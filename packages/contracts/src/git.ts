@@ -105,6 +105,16 @@ export type GitResolvedPullRequest = typeof GitResolvedPullRequest.Type;
 
 // RPC Inputs
 
+export const GitWorkingTreeDiffInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+});
+export type GitWorkingTreeDiffInput = typeof GitWorkingTreeDiffInput.Type;
+
+export const GitWorkingTreeDiffResult = Schema.Struct({
+  diff: Schema.String,
+});
+export type GitWorkingTreeDiffResult = typeof GitWorkingTreeDiffResult.Type;
+
 export const GitStatusInput = Schema.Struct({
   cwd: TrimmedNonEmptyStringSchema,
 });

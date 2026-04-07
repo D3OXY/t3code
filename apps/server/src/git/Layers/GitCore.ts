@@ -46,6 +46,7 @@ const PREPARED_COMMIT_PATCH_MAX_OUTPUT_BYTES = 49_000;
 const RANGE_COMMIT_SUMMARY_MAX_OUTPUT_BYTES = 19_000;
 const RANGE_DIFF_SUMMARY_MAX_OUTPUT_BYTES = 19_000;
 const RANGE_DIFF_PATCH_MAX_OUTPUT_BYTES = 59_000;
+const WORKING_TREE_DIFF_MAX_OUTPUT_BYTES = 512_000;
 const WORKSPACE_FILES_MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 const GIT_CHECK_IGNORE_MAX_STDIN_BYTES = 256 * 1024;
 const WORKSPACE_GIT_HARDENED_CONFIG_ARGS = [
@@ -1628,6 +1629,46 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
     },
   );
 
+  const readWorkingTreeDiff: GitCoreShape["readWorkingTreeDiff"] = Effect.fn("readWorkingTreeDiff")(
+    function* (cwd) {
+      // Check whether the repository has any commits yet.
+      const hasCommits = yield* executeGit(
+        "GitCore.readWorkingTreeDiff.hasCommits",
+        cwd,
+        ["rev-parse", "HEAD"],
+        { allowNonZeroExit: true, timeoutMs: 5_000, maxOutputBytes: 256 },
+      ).pipe(Effect.map((result) => result.code === 0));
+
+      if (hasCommits) {
+        // Standard case: diff HEAD covers staged + unstaged changes on tracked files.
+        const trackedDiff = yield* runGitStdoutWithOptions(
+          "GitCore.readWorkingTreeDiff.trackedDiff",
+          cwd,
+          ["diff", "HEAD", "--patch", "--minimal", "--no-color"],
+          {
+            maxOutputBytes: WORKING_TREE_DIFF_MAX_OUTPUT_BYTES,
+            truncateOutputAtMaxBytes: true,
+          },
+        );
+
+        return trackedDiff;
+      }
+
+      // No commits yet: show staged changes (initial add).
+      const stagedDiff = yield* runGitStdoutWithOptions(
+        "GitCore.readWorkingTreeDiff.stagedDiff",
+        cwd,
+        ["diff", "--cached", "--patch", "--minimal", "--no-color"],
+        {
+          maxOutputBytes: WORKING_TREE_DIFF_MAX_OUTPUT_BYTES,
+          truncateOutputAtMaxBytes: true,
+        },
+      );
+
+      return stagedDiff;
+    },
+  );
+
   const readConfigValue: GitCoreShape["readConfigValue"] = (cwd, key) =>
     runGitStdout("GitCore.readConfigValue", cwd, ["config", "--get", key], true).pipe(
       Effect.map((stdout) => stdout.trim()),
@@ -2184,6 +2225,7 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
     pushCurrentBranch,
     pullCurrentBranch,
     readRangeContext,
+    readWorkingTreeDiff,
     readConfigValue,
     isInsideWorkTree,
     listWorkspaceFiles,

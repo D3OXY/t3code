@@ -882,6 +882,12 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
             git.initRepo(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
             { "rpc.aggregate": "git" },
           ),
+        [WS_METHODS.gitWorkingTreeDiff]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.gitWorkingTreeDiff,
+            git.readWorkingTreeDiff(input.cwd).pipe(Effect.map((diff) => ({ diff }))),
+            { "rpc.aggregate": "git" },
+          ),
         [WS_METHODS.terminalOpen]: (input) =>
           observeRpcEffect(WS_METHODS.terminalOpen, terminalManager.open(input), {
             "rpc.aggregate": "terminal",

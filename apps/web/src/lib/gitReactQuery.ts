@@ -23,6 +23,8 @@ export const gitQueryKeys = {
     ["git", "branches", environmentId ?? null, cwd] as const,
   branchSearch: (environmentId: EnvironmentId | null, cwd: string | null, query: string) =>
     ["git", "branches", environmentId ?? null, cwd, "search", query] as const,
+  workingTreeDiff: (environmentId: EnvironmentId | null, cwd: string | null) =>
+    ["git", "workingTreeDiff", environmentId ?? null, cwd] as const,
 };
 
 export const gitMutationKeys = {
@@ -253,6 +255,26 @@ export function gitRemoveWorktreeMutationOptions(input: {
     onSuccess: async () => {
       await invalidateGitQueries(input.queryClient, { environmentId: input.environmentId });
     },
+  });
+}
+
+export function gitWorkingTreeDiffQueryOptions(input: {
+  environmentId: EnvironmentId | null;
+  cwd: string | null;
+  enabled?: boolean;
+}) {
+  return queryOptions({
+    queryKey: gitQueryKeys.workingTreeDiff(input.environmentId, input.cwd),
+    queryFn: async () => {
+      if (!input.cwd || !input.environmentId) {
+        throw new Error("Git working tree diff is unavailable.");
+      }
+      const api = ensureEnvironmentApi(input.environmentId);
+      return api.git.workingTreeDiff({ cwd: input.cwd });
+    },
+    enabled: input.environmentId !== null && input.cwd !== null && (input.enabled ?? true),
+    staleTime: 0,
+    refetchOnWindowFocus: true,
   });
 }
 

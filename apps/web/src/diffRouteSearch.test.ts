@@ -71,4 +71,46 @@ describe("parseDiffRouteSearch", () => {
       diff: "1",
     });
   });
+
+  it("parses diffScope when diff is open", () => {
+    expect(
+      parseDiffRouteSearch({
+        diff: "1",
+        diffScope: "git",
+      }),
+    ).toEqual({
+      diff: "1",
+      diffScope: "git",
+    });
+
+    expect(
+      parseDiffRouteSearch({
+        diff: "1",
+        diffScope: "session",
+      }),
+    ).toEqual({
+      diff: "1",
+      diffScope: "session",
+    });
+  });
+
+  it("drops diffScope when diff is closed", () => {
+    expect(
+      parseDiffRouteSearch({
+        diff: "0",
+        diffScope: "git",
+      }),
+    ).toEqual({});
+  });
+
+  it("drops invalid diffScope values", () => {
+    expect(
+      parseDiffRouteSearch({
+        diff: "1",
+        diffScope: "invalid",
+      }),
+    ).toEqual({
+      diff: "1",
+    });
+  });
 });

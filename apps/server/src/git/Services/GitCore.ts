@@ -198,6 +198,11 @@ export interface GitCoreShape {
   ) => Effect.Effect<GitRangeContext, GitCommandError>;
 
   /**
+   * Read a unified patch of working tree changes (staged + unstaged) on tracked files against HEAD.
+   */
+  readonly readWorkingTreeDiff: (cwd: string) => Effect.Effect<string, GitCommandError>;
+
+  /**
    * Read a Git config value from the local repository.
    */
   readonly readConfigValue: (

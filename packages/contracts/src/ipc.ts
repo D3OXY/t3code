@@ -17,6 +17,8 @@ import type {
   GitStatusInput,
   GitStatusResult,
   GitCreateBranchResult,
+  GitWorkingTreeDiffInput,
+  GitWorkingTreeDiffResult,
 } from "./git";
 import type { FilesystemBrowseInput, FilesystemBrowseResult } from "./filesystem";
 import type {
@@ -258,6 +260,7 @@ export interface EnvironmentApi {
     preparePullRequestThread: (
       input: GitPreparePullRequestThreadInput,
     ) => Promise<GitPreparePullRequestThreadResult>;
+    workingTreeDiff: (input: GitWorkingTreeDiffInput) => Promise<GitWorkingTreeDiffResult>;
     pull: (input: GitPullInput) => Promise<GitPullResult>;
     refreshStatus: (input: GitStatusInput) => Promise<GitStatusResult>;
     onStatus: (
