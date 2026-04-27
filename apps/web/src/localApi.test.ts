@@ -541,6 +541,11 @@ describe("wsApi", () => {
       sidebarProjectSortOrder: "manual" as const,
       sidebarThreadSortOrder: "created_at" as const,
       timestampFormat: "24-hour" as const,
+      notificationSoundEnabled: false,
+      notificationSoundOnTurnEnd: false,
+      notificationSoundOnApproval: false,
+      notificationSoundOnQuestion: false,
+      notificationSoundFocusRule: "unfocused-or-different-thread" as const,
     };
     const getClientSettings = vi.fn().mockResolvedValue({
       ...clientSettings,
@@ -600,6 +605,11 @@ describe("wsApi", () => {
       sidebarProjectSortOrder: "manual" as const,
       sidebarThreadSortOrder: "created_at" as const,
       timestampFormat: "24-hour" as const,
+      notificationSoundEnabled: false,
+      notificationSoundOnTurnEnd: false,
+      notificationSoundOnApproval: false,
+      notificationSoundOnQuestion: false,
+      notificationSoundFocusRule: "unfocused-or-different-thread" as const,
     };
 
     await api.persistence.setClientSettings(clientSettings);
