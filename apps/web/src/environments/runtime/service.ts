@@ -631,7 +631,7 @@ export function shouldApplyTerminalEvent(input: {
 function summaryToNotificationShell(summary: SidebarThreadSummary): NotificationThreadShellLike {
   return {
     archivedAt: summary.archivedAt,
-    latestTurn: summary.latestTurn ? { state: summary.latestTurn.state } : null,
+    session: summary.session ? { orchestrationStatus: summary.session.orchestrationStatus } : null,
     hasPendingApprovals: summary.hasPendingApprovals,
     hasPendingUserInput: summary.hasPendingUserInput,
     hasActionableProposedPlan: summary.hasActionableProposedPlan,
