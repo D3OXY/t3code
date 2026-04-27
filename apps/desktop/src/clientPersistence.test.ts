@@ -54,6 +54,11 @@ const clientSettings: ClientSettings = {
   confirmThreadDelete: false,
   diffWordWrap: true,
   favorites: [],
+  notificationSoundEnabled: false,
+  notificationSoundOnTurnEnd: false,
+  notificationSoundOnApproval: false,
+  notificationSoundOnQuestion: false,
+  notificationSoundFocusRule: "unfocused-or-different-thread",
   sidebarProjectGroupingMode: "repository_path",
   sidebarProjectGroupingOverrides: {
     "environment-1:/tmp/project-a": "separate",
