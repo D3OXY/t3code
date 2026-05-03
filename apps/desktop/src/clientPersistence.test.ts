@@ -59,6 +59,7 @@ const clientSettings: ClientSettings = {
   notificationSoundOnApproval: false,
   notificationSoundOnQuestion: false,
   notificationSoundFocusRule: "unfocused-or-different-thread",
+  providerModelPreferences: {},
   sidebarProjectGroupingMode: "repository_path",
   sidebarProjectGroupingOverrides: {
     "environment-1:/tmp/project-a": "separate",
