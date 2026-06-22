@@ -89,6 +89,17 @@ const makeActiveThreadStartRuntime = Effect.fn("ThreadToolkit.makeActiveRuntime"
     );
   });
 
+  const resolveRequiredCurrentBranch = Effect.fn("ThreadToolkit.resolveRequiredCurrentBranch")(
+    function* (cwd: string, failureMessage: string) {
+      const branch = yield* gitWorkflow.status({ cwd }).pipe(
+        Effect.map((status) => status.refName),
+        Effect.mapError((error) => fail(error instanceof Error ? error.message : failureMessage)),
+      );
+      if (branch) return branch;
+      return yield* fail(failureMessage);
+    },
+  );
+
   const resolveDefaultBranch = Effect.fn("ThreadToolkit.resolveDefaultBranch")(function* (
     cwd: string,
   ) {
@@ -132,9 +143,18 @@ const makeActiveThreadStartRuntime = Effect.fn("ThreadToolkit.makeActiveRuntime"
       if (!input.worktreePath) {
         return yield* fail("existing_worktree mode requires worktreePath.");
       }
-      return yield* resolveCurrentBranch(input.worktreePath);
+      return yield* resolveRequiredCurrentBranch(
+        input.worktreePath,
+        `Could not resolve current branch for existing worktree ${input.worktreePath}.`,
+      );
     }
-    return sourceThread.branch ?? (yield* resolveCurrentBranch(project.workspaceRoot));
+    return (
+      sourceThread.branch ??
+      (yield* resolveRequiredCurrentBranch(
+        sourceThread.worktreePath ?? project.workspaceRoot,
+        "Could not resolve current branch for the current checkout.",
+      ))
+    );
   });
 
   const loadSourceContext = Effect.fn("ThreadToolkit.loadSourceContext")(function* (
@@ -176,7 +196,11 @@ const makeActiveThreadStartRuntime = Effect.fn("ThreadToolkit.makeActiveRuntime"
     const createdAt = yield* nowIso;
     const branch = (yield* resolveInitialBranch(mode, input, project, sourceThread)) ?? null;
     const worktreePath: string | null =
-      mode === "existing_worktree" ? (input.worktreePath ?? null) : null;
+      mode === "existing_worktree"
+        ? (input.worktreePath ?? null)
+        : mode === "current_checkout"
+          ? (sourceThread.worktreePath ?? project.workspaceRoot)
+          : null;
     const title = input.title ?? truncateTitle(input.prompt);
     const modelSelection = resolveModelSelection(input, sourceThread);
     const runtimeMode = input.runtimeMode ?? sourceThread.runtimeMode;

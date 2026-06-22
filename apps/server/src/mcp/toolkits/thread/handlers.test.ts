@@ -1,6 +1,7 @@
 import { expect, it } from "@effect/vitest";
 import {
   EnvironmentId,
+  GitCommandError,
   ProjectId,
   ProviderInstanceId,
   ThreadId,
@@ -93,7 +94,11 @@ const TestCryptoLive = Layer.sync(Crypto.Crypto, () => {
 
 const makeTestLayer = (
   commands: OrchestrationCommand[],
-  options: { readonly enqueueCalls?: number[] } = {},
+  options: {
+    readonly enqueueCalls?: number[];
+    readonly gitStatus?: GitWorkflowService["Service"]["status"];
+    readonly sourceThread?: OrchestrationThreadShell;
+  } = {},
 ) => {
   const bootstrapTurnStartDispatcherLayer = Layer.mock(
     BootstrapTurnStartDispatcher.BootstrapTurnStartDispatcher,
@@ -126,7 +131,7 @@ const makeTestLayer = (
     Layer.provide(
       Layer.mock(ProjectionSnapshotQuery)({
         getProjectShellById: () => Effect.succeed(Option.some(project)),
-        getThreadShellById: () => Effect.succeed(Option.some(sourceThread)),
+        getThreadShellById: () => Effect.succeed(Option.some(options.sourceThread ?? sourceThread)),
       }),
     ),
     Layer.provide(
@@ -147,24 +152,26 @@ const makeTestLayer = (
             nextCursor: null,
             totalCount: 1,
           }),
-        status: () =>
-          Effect.succeed({
-            isRepo: true,
-            hasPrimaryRemote: true,
-            isDefaultRef: false,
-            refName: "feature/source",
-            hasWorkingTreeChanges: false,
-            workingTree: {
-              files: [],
-              insertions: 0,
-              deletions: 0,
-            },
-            hasUpstream: true,
-            aheadCount: 0,
-            behindCount: 0,
-            aheadOfDefaultCount: 0,
-            pr: null,
-          }),
+        status:
+          options.gitStatus ??
+          (() =>
+            Effect.succeed({
+              isRepo: true,
+              hasPrimaryRemote: true,
+              isDefaultRef: false,
+              refName: "feature/source",
+              hasWorkingTreeChanges: false,
+              workingTree: {
+                files: [],
+                insertions: 0,
+                deletions: 0,
+              },
+              hasUpstream: true,
+              aheadCount: 0,
+              behindCount: 0,
+              aheadOfDefaultCount: 0,
+              pr: null,
+            })),
       }),
     ),
     Layer.provide(
@@ -190,7 +197,11 @@ const makeTestLayer = (
 const callStartTool = (
   arguments_: Record<string, unknown>,
   commands: OrchestrationCommand[],
-  options: { readonly enqueueCalls?: number[] } = {},
+  options: {
+    readonly enqueueCalls?: number[];
+    readonly gitStatus?: GitWorkflowService["Service"]["status"];
+    readonly sourceThread?: OrchestrationThreadShell;
+  } = {},
 ) =>
   Effect.gen(function* () {
     const server = yield* McpServer.McpServer;
@@ -272,9 +283,11 @@ it.effect("passes explicit setup script requests for existing worktrees", () =>
 it.effect("starts current-checkout threads with warning metadata", () =>
   Effect.gen(function* () {
     const commands: OrchestrationCommand[] = [];
+    const sourceWorktreePath = "/repo/.worktrees/source";
     const result = yield* callStartTool(
-      { prompt: "Read current diff", mode: "current_checkout" },
+      { prompt: "Read current diff", mode: "current_checkout", runSetupScript: true },
       commands,
+      { sourceThread: { ...sourceThread, worktreePath: sourceWorktreePath } },
     );
 
     expect(result.isError).toBe(false);
@@ -282,13 +295,63 @@ it.effect("starts current-checkout threads with warning metadata", () =>
       projectId,
       mode: "current_checkout",
       branch: "feature/source",
-      worktreePath: null,
+      worktreePath: sourceWorktreePath,
     });
     expect(result.structuredContent).toHaveProperty("warning");
     const command = commands[0];
     expect(command?.type).toBe("thread.turn.start");
     if (command?.type !== "thread.turn.start") return;
     expect(command.bootstrap?.prepareWorktree).toBeUndefined();
-    expect(command.bootstrap?.createThread?.worktreePath).toBeNull();
+    expect(command.bootstrap?.createThread?.worktreePath).toBe(sourceWorktreePath);
+    expect(command.bootstrap?.runSetupScript).toBe(true);
+  }),
+);
+
+it.effect("fails existing worktree mode when git status cannot resolve the branch", () =>
+  Effect.gen(function* () {
+    const commands: OrchestrationCommand[] = [];
+    const result = yield* callStartTool(
+      { prompt: "Use bad checkout", mode: "existing_worktree", worktreePath: "/missing" },
+      commands,
+      {
+        gitStatus: () =>
+          Effect.fail(
+            new GitCommandError({
+              operation: "status",
+              command: "git status",
+              cwd: "/missing",
+              detail: "not a git repository",
+            }),
+          ),
+      },
+    );
+
+    expect(result.isError).toBe(true);
+    expect(commands).toHaveLength(0);
+  }),
+);
+
+it.effect("fails current checkout mode when fallback branch lookup fails", () =>
+  Effect.gen(function* () {
+    const commands: OrchestrationCommand[] = [];
+    const result = yield* callStartTool(
+      { prompt: "Use current checkout", mode: "current_checkout" },
+      commands,
+      {
+        sourceThread: { ...sourceThread, branch: null, worktreePath: "/missing" },
+        gitStatus: () =>
+          Effect.fail(
+            new GitCommandError({
+              operation: "status",
+              command: "git status",
+              cwd: "/missing",
+              detail: "not a git repository",
+            }),
+          ),
+      },
+    );
+
+    expect(result.isError).toBe(true);
+    expect(commands).toHaveLength(0);
   }),
 );
