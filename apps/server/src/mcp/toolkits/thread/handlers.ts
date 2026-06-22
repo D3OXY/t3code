@@ -31,8 +31,6 @@ import {
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 const isThreadStartToolError = Schema.is(ThreadStartToolError);
 
-const fail = (message: string) => new ThreadStartToolError({ message });
-
 const truncateTitle = (value: string): string => {
   const trimmed = value.trim().replace(/\s+/g, " ");
   if (trimmed.length === 0) return "New thread";
@@ -41,10 +39,10 @@ const truncateTitle = (value: string): string => {
 
 const resolveOption = <A>(
   option: Option.Option<A>,
-  message: string,
+  error: ThreadStartToolError,
 ): Effect.Effect<A, ThreadStartToolError> =>
   Option.match(option, {
-    onNone: () => Effect.fail(fail(message)),
+    onNone: () => Effect.fail(error),
     onSome: Effect.succeed,
   });
 
@@ -93,10 +91,22 @@ const makeActiveThreadStartRuntime = Effect.fn("ThreadToolkit.makeActiveRuntime"
     function* (cwd: string, failureMessage: string) {
       const branch = yield* gitWorkflow.status({ cwd }).pipe(
         Effect.map((status) => status.refName),
-        Effect.mapError((error) => fail(error instanceof Error ? error.message : failureMessage)),
+        Effect.mapError(
+          (cause) =>
+            new ThreadStartToolError({
+              message: cause instanceof Error ? cause.message : failureMessage,
+              operation: "git.status",
+              cwd,
+              cause,
+            }),
+        ),
       );
       if (branch) return branch;
-      return yield* fail(failureMessage);
+      return yield* new ThreadStartToolError({
+        message: failureMessage,
+        operation: "git.status",
+        cwd,
+      });
     },
   );
 
@@ -127,7 +137,12 @@ const makeActiveThreadStartRuntime = Effect.fn("ThreadToolkit.makeActiveRuntime"
       const currentBranch = yield* resolveCurrentBranch(project.workspaceRoot);
       if (currentBranch) return currentBranch;
 
-      return yield* fail("Could not resolve a base branch for the new worktree.");
+      return yield* new ThreadStartToolError({
+        message: "Could not resolve a base branch for the new worktree.",
+        operation: "resolve-new-worktree-base-branch",
+        cwd: project.workspaceRoot,
+        projectId: project.id,
+      });
     },
   );
 
@@ -141,7 +156,11 @@ const makeActiveThreadStartRuntime = Effect.fn("ThreadToolkit.makeActiveRuntime"
     if (mode === "new_worktree") return yield* makeTemporaryBranchName();
     if (mode === "existing_worktree") {
       if (!input.worktreePath) {
-        return yield* fail("existing_worktree mode requires worktreePath.");
+        return yield* new ThreadStartToolError({
+          message: "existing_worktree mode requires worktreePath.",
+          operation: "resolve-initial-branch",
+          projectId: project.id,
+        });
       }
       return yield* resolveRequiredCurrentBranch(
         input.worktreePath,
@@ -164,22 +183,48 @@ const makeActiveThreadStartRuntime = Effect.fn("ThreadToolkit.makeActiveRuntime"
       .getThreadShellById(invocation.threadId)
       .pipe(
         Effect.flatMap((thread) =>
-          resolveOption(thread, `Source thread ${invocation.threadId} was not found.`),
+          resolveOption(
+            thread,
+            new ThreadStartToolError({
+              message: `Source thread ${invocation.threadId} was not found.`,
+              operation: "load-source-thread",
+              threadId: invocation.threadId,
+            }),
+          ),
         ),
-        Effect.mapError((error) =>
-          isThreadStartToolError(error)
-            ? error
-            : fail(error instanceof Error ? error.message : "Failed to load source thread."),
+        Effect.mapError((cause) =>
+          isThreadStartToolError(cause)
+            ? cause
+            : new ThreadStartToolError({
+                message: cause instanceof Error ? cause.message : "Failed to load source thread.",
+                operation: "load-source-thread",
+                threadId: invocation.threadId,
+                cause,
+              }),
         ),
       );
     const project = yield* projectionSnapshotQuery.getProjectShellById(sourceThread.projectId).pipe(
       Effect.flatMap((project) =>
-        resolveOption(project, `Project ${sourceThread.projectId} was not found.`),
+        resolveOption(
+          project,
+          new ThreadStartToolError({
+            message: `Project ${sourceThread.projectId} was not found.`,
+            operation: "load-source-project",
+            threadId: sourceThread.id,
+            projectId: sourceThread.projectId,
+          }),
+        ),
       ),
-      Effect.mapError((error) =>
-        isThreadStartToolError(error)
-          ? error
-          : fail(error instanceof Error ? error.message : "Failed to load source project."),
+      Effect.mapError((cause) =>
+        isThreadStartToolError(cause)
+          ? cause
+          : new ThreadStartToolError({
+              message: cause instanceof Error ? cause.message : "Failed to load source project.",
+              operation: "load-source-project",
+              threadId: sourceThread.id,
+              projectId: sourceThread.projectId,
+              cause,
+            }),
       ),
     );
 
@@ -216,7 +261,12 @@ const makeActiveThreadStartRuntime = Effect.fn("ThreadToolkit.makeActiveRuntime"
     const runSetupScript = input.runSetupScript ?? (mode === "new_worktree" ? true : undefined);
 
     if (mode === "existing_worktree" && !worktreePath) {
-      return yield* fail("existing_worktree mode requires worktreePath.");
+      return yield* new ThreadStartToolError({
+        message: "existing_worktree mode requires worktreePath.",
+        operation: "start-thread",
+        threadId: ids.threadId,
+        projectId: project.id,
+      });
     }
 
     const command: Extract<OrchestrationCommand, { type: "thread.turn.start" }> = {
@@ -253,8 +303,15 @@ const makeActiveThreadStartRuntime = Effect.fn("ThreadToolkit.makeActiveRuntime"
     const result = yield* startup
       .enqueueCommand(BootstrapTurnStartDispatcher.dispatchActive(command))
       .pipe(
-        Effect.mapError((error) =>
-          fail(error instanceof Error ? error.message : "Failed to start child thread."),
+        Effect.mapError(
+          (cause) =>
+            new ThreadStartToolError({
+              message: cause instanceof Error ? cause.message : "Failed to start child thread.",
+              operation: "start-child-thread",
+              threadId: ids.threadId,
+              projectId: project.id,
+              cause,
+            }),
         ),
       );
 
@@ -297,10 +354,22 @@ const resolveModelSelection = (
 
 const startThread = Effect.fn("ThreadToolkit.startThread")(function* (input: ThreadStartToolInput) {
   const invocation = yield* McpInvocationContext.requireMcpCapability("thread-management").pipe(
-    Effect.mapError((error) => fail(error.message)),
+    Effect.mapError(
+      (cause) =>
+        new ThreadStartToolError({
+          message: cause.message,
+          operation: "require-mcp-capability",
+          cause,
+        }),
+    ),
   );
   const runtime = activeThreadStartRuntime;
-  if (!runtime) return yield* fail("Thread start runtime is not available.");
+  if (!runtime) {
+    return yield* new ThreadStartToolError({
+      message: "Thread start runtime is not available.",
+      operation: "start-thread",
+    });
+  }
   return yield* runtime(input, invocation);
 });
 

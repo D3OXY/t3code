@@ -53,27 +53,25 @@ function projectSetupScriptCompatibilityDetail(
   }
 }
 
-export interface BootstrapTurnStartDispatcherShape {
-  readonly dispatch: (command: ThreadTurnStartCommand) => Effect.Effect<
-    {
-      readonly sequence: number;
-      readonly branch: string | null;
-      readonly worktreePath: string | null;
-    },
-    OrchestrationDispatchCommandError
-  >;
-}
-
 export class BootstrapTurnStartDispatcher extends Context.Service<
   BootstrapTurnStartDispatcher,
-  BootstrapTurnStartDispatcherShape
+  {
+    readonly dispatch: (command: ThreadTurnStartCommand) => Effect.Effect<
+      {
+        readonly sequence: number;
+        readonly branch: string | null;
+        readonly worktreePath: string | null;
+      },
+      OrchestrationDispatchCommandError
+    >;
+  }
 >()("t3/orchestration/Services/BootstrapTurnStartDispatcher") {}
 
-let activeDispatcher: BootstrapTurnStartDispatcherShape | null = null;
+let activeDispatcher: BootstrapTurnStartDispatcher["Service"] | null = null;
 
 export const dispatchActive = (
   command: ThreadTurnStartCommand,
-): ReturnType<BootstrapTurnStartDispatcherShape["dispatch"]> => {
+): ReturnType<BootstrapTurnStartDispatcher["Service"]["dispatch"]> => {
   const dispatcher = activeDispatcher;
   if (!dispatcher) {
     return Effect.fail(

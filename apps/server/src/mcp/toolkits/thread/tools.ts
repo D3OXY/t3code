@@ -50,6 +50,11 @@ export class ThreadStartToolError extends Schema.TaggedErrorClass<ThreadStartToo
   "ThreadStartToolError",
   {
     message: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+    operation: Schema.optional(Schema.String),
+    cwd: Schema.optional(Schema.String),
+    threadId: Schema.optional(ThreadId),
+    projectId: Schema.optional(ProjectId),
   },
 ) {}
 
