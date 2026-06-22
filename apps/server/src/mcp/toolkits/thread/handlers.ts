@@ -3,6 +3,7 @@ import {
   MessageId,
   ThreadId,
   type ModelSelection,
+  type OrchestrationCommand,
   type OrchestrationProjectShell,
   type OrchestrationThreadShell,
 } from "@t3tools/contracts";
@@ -18,6 +19,7 @@ import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as BootstrapTurnStartDispatcher from "../../../orchestration/Services/BootstrapTurnStartDispatcher.ts";
 import { ProjectionSnapshotQuery } from "../../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { GitWorkflowService } from "../../../git/GitWorkflowService.ts";
+import * as ServerRuntimeStartup from "../../../serverRuntimeStartup.ts";
 import {
   ThreadStartToolError,
   type ThreadStartMode,
@@ -60,6 +62,7 @@ const makeActiveThreadStartRuntime = Effect.fn("ThreadToolkit.makeActiveRuntime"
   const crypto = yield* Crypto.Crypto;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const gitWorkflow = yield* GitWorkflowService;
+  const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
   const uuid = () => crypto.randomUUIDv4.pipe(Effect.orDie);
 
   const makeIds = Effect.fn("ThreadToolkit.makeIds")(function* () {
@@ -186,12 +189,13 @@ const makeActiveThreadStartRuntime = Effect.fn("ThreadToolkit.makeActiveRuntime"
             branch: branch ?? undefined,
           }
         : undefined;
+    const runSetupScript = input.runSetupScript ?? (mode === "new_worktree" ? true : undefined);
 
     if (mode === "existing_worktree" && !worktreePath) {
       return yield* fail("existing_worktree mode requires worktreePath.");
     }
 
-    yield* BootstrapTurnStartDispatcher.dispatchActive({
+    const command: Extract<OrchestrationCommand, { type: "thread.turn.start" }> = {
       type: "thread.turn.start",
       commandId: ids.commandId,
       threadId: ids.threadId,
@@ -216,26 +220,26 @@ const makeActiveThreadStartRuntime = Effect.fn("ThreadToolkit.makeActiveRuntime"
           worktreePath,
           createdAt,
         },
-        ...(prepareWorktree
-          ? {
-              prepareWorktree,
-              runSetupScript: input.runSetupScript ?? true,
-            }
-          : {}),
+        ...(prepareWorktree ? { prepareWorktree } : {}),
+        ...(runSetupScript === undefined ? {} : { runSetupScript }),
       },
       createdAt,
-    }).pipe(
-      Effect.mapError((error) =>
-        fail(error instanceof Error ? error.message : "Failed to start child thread."),
-      ),
-    );
+    };
+
+    const result = yield* startup
+      .enqueueCommand(BootstrapTurnStartDispatcher.dispatchActive(command))
+      .pipe(
+        Effect.mapError((error) =>
+          fail(error instanceof Error ? error.message : "Failed to start child thread."),
+        ),
+      );
 
     return {
       threadId: ids.threadId,
       projectId: project.id,
       mode,
-      branch,
-      worktreePath,
+      branch: result.branch ?? branch,
+      worktreePath: result.worktreePath,
       ...(mode === "current_checkout"
         ? {
             warning:

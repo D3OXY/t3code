@@ -54,9 +54,14 @@ function projectSetupScriptCompatibilityDetail(
 }
 
 export interface BootstrapTurnStartDispatcherShape {
-  readonly dispatch: (
-    command: ThreadTurnStartCommand,
-  ) => Effect.Effect<{ readonly sequence: number }, OrchestrationDispatchCommandError>;
+  readonly dispatch: (command: ThreadTurnStartCommand) => Effect.Effect<
+    {
+      readonly sequence: number;
+      readonly branch: string | null;
+      readonly worktreePath: string | null;
+    },
+    OrchestrationDispatchCommandError
+  >;
 }
 
 export class BootstrapTurnStartDispatcher extends Context.Service<
@@ -68,7 +73,7 @@ let activeDispatcher: BootstrapTurnStartDispatcherShape | null = null;
 
 export const dispatchActive = (
   command: ThreadTurnStartCommand,
-): Effect.Effect<{ readonly sequence: number }, OrchestrationDispatchCommandError> => {
+): ReturnType<BootstrapTurnStartDispatcherShape["dispatch"]> => {
   const dispatcher = activeDispatcher;
   if (!dispatcher) {
     return Effect.fail(
@@ -176,6 +181,7 @@ export const layer = Layer.effect(
       let createdThread = false;
       let targetProjectId = bootstrap?.createThread?.projectId;
       let targetProjectCwd = bootstrap?.prepareWorktree?.projectCwd;
+      let targetBranch = bootstrap?.createThread?.branch ?? null;
       let targetWorktreePath = bootstrap?.createThread?.worktreePath ?? null;
 
       const cleanupCreatedThread = () =>
@@ -346,6 +352,7 @@ export const layer = Layer.effect(
             baseRefName: bootstrap.prepareWorktree.baseBranch,
             path: null,
           });
+          targetBranch = worktree.worktree.refName;
           targetWorktreePath = worktree.worktree.path;
           yield* orchestrationEngine.dispatch({
             type: "thread.meta.update",
@@ -359,7 +366,12 @@ export const layer = Layer.effect(
 
         yield* runSetupProgram();
 
-        return yield* orchestrationEngine.dispatch(finalTurnStartCommand);
+        const result = yield* orchestrationEngine.dispatch(finalTurnStartCommand);
+        return {
+          ...result,
+          branch: targetBranch,
+          worktreePath: targetWorktreePath,
+        };
       });
 
       return yield* bootstrapProgram.pipe(

@@ -20,6 +20,7 @@ import { GitWorkflowService } from "../../../git/GitWorkflowService.ts";
 import * as BootstrapTurnStartDispatcher from "../../../orchestration/Services/BootstrapTurnStartDispatcher.ts";
 import { OrchestrationEngineService } from "../../../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../../../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as ServerRuntimeStartup from "../../../serverRuntimeStartup.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import { ThreadToolkitRegistrationLive } from "../../McpHttpServer.ts";
 import { ThreadStartRuntimeLive } from "./handlers.ts";
@@ -90,14 +91,26 @@ const TestCryptoLive = Layer.sync(Crypto.Crypto, () => {
   });
 });
 
-const makeTestLayer = (commands: OrchestrationCommand[]) => {
+const makeTestLayer = (
+  commands: OrchestrationCommand[],
+  options: { readonly enqueueCalls?: number[] } = {},
+) => {
   const bootstrapTurnStartDispatcherLayer = Layer.mock(
     BootstrapTurnStartDispatcher.BootstrapTurnStartDispatcher,
   )({
     dispatch: (command) =>
       Effect.sync(() => {
         commands.push(command);
-        return { sequence: 1 };
+        return {
+          sequence: 1,
+          branch:
+            command.bootstrap?.prepareWorktree?.branch ??
+            command.bootstrap?.createThread?.branch ??
+            null,
+          worktreePath: command.bootstrap?.prepareWorktree
+            ? "/repo/.worktrees/generated"
+            : (command.bootstrap?.createThread?.worktreePath ?? null),
+        };
       }),
   });
 
@@ -161,10 +174,24 @@ const makeTestLayer = (commands: OrchestrationCommand[]) => {
         streamDomainEvents: Stream.empty,
       }),
     ),
+    Layer.provide(
+      Layer.mock(ServerRuntimeStartup.ServerRuntimeStartup)({
+        awaitCommandReady: Effect.void,
+        markHttpListening: Effect.void,
+        enqueueCommand: (effect) =>
+          Effect.sync(() => {
+            options.enqueueCalls?.push(1);
+          }).pipe(Effect.flatMap(() => effect)),
+      }),
+    ),
   );
 };
 
-const callStartTool = (arguments_: Record<string, unknown>, commands: OrchestrationCommand[]) =>
+const callStartTool = (
+  arguments_: Record<string, unknown>,
+  commands: OrchestrationCommand[],
+  options: { readonly enqueueCalls?: number[] } = {},
+) =>
   Effect.gen(function* () {
     const server = yield* McpServer.McpServer;
     return yield* server
@@ -173,7 +200,7 @@ const callStartTool = (arguments_: Record<string, unknown>, commands: Orchestrat
         Effect.provideService(McpInvocationContext.McpInvocationContext, invocation),
         Effect.provideService(McpSchema.McpServerClient, client),
       );
-  }).pipe(Effect.provide(makeTestLayer(commands)));
+  }).pipe(Effect.provide(makeTestLayer(commands, options)));
 
 it.effect("starts a new worktree thread by default and inherits source settings", () =>
   Effect.gen(function* () {
@@ -184,7 +211,7 @@ it.effect("starts a new worktree thread by default and inherits source settings"
     expect(result.structuredContent).toMatchObject({
       projectId,
       mode: "new_worktree",
-      worktreePath: null,
+      worktreePath: "/repo/.worktrees/generated",
     });
     const command = commands[0];
     expect(command?.type).toBe("thread.turn.start");
@@ -198,6 +225,46 @@ it.effect("starts a new worktree thread by default and inherits source settings"
       projectCwd: "/repo",
       baseBranch: "main",
     });
+    expect(command.bootstrap?.runSetupScript).toBe(true);
+  }),
+);
+
+it.effect("queues thread starts through server runtime startup", () =>
+  Effect.gen(function* () {
+    const commands: OrchestrationCommand[] = [];
+    const enqueueCalls: number[] = [];
+    const result = yield* callStartTool({ prompt: "Wait for server readiness" }, commands, {
+      enqueueCalls,
+    });
+
+    expect(result.isError).toBe(false);
+    expect(enqueueCalls).toHaveLength(1);
+    expect(commands).toHaveLength(1);
+  }),
+);
+
+it.effect("passes explicit setup script requests for existing worktrees", () =>
+  Effect.gen(function* () {
+    const commands: OrchestrationCommand[] = [];
+    const result = yield* callStartTool(
+      {
+        prompt: "Use existing checkout",
+        mode: "existing_worktree",
+        worktreePath: "/repo/existing",
+        runSetupScript: true,
+      },
+      commands,
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.structuredContent).toMatchObject({
+      mode: "existing_worktree",
+      worktreePath: "/repo/existing",
+    });
+    const command = commands[0];
+    expect(command?.type).toBe("thread.turn.start");
+    if (command?.type !== "thread.turn.start") return;
+    expect(command.bootstrap?.prepareWorktree).toBeUndefined();
     expect(command.bootstrap?.runSetupScript).toBe(true);
   }),
 );
