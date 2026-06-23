@@ -94,7 +94,7 @@ const makeActiveThreadStartRuntime = Effect.fn("ThreadToolkit.makeActiveRuntime"
         Effect.mapError(
           (cause) =>
             new ThreadStartToolError({
-              message: cause instanceof Error ? cause.message : failureMessage,
+              message: failureMessage,
               operation: "git.status",
               cwd,
               cause,
@@ -196,7 +196,7 @@ const makeActiveThreadStartRuntime = Effect.fn("ThreadToolkit.makeActiveRuntime"
           isThreadStartToolError(cause)
             ? cause
             : new ThreadStartToolError({
-                message: cause instanceof Error ? cause.message : "Failed to load source thread.",
+                message: "Failed to load source thread.",
                 operation: "load-source-thread",
                 threadId: invocation.threadId,
                 cause,
@@ -219,7 +219,7 @@ const makeActiveThreadStartRuntime = Effect.fn("ThreadToolkit.makeActiveRuntime"
         isThreadStartToolError(cause)
           ? cause
           : new ThreadStartToolError({
-              message: cause instanceof Error ? cause.message : "Failed to load source project.",
+              message: "Failed to load source project.",
               operation: "load-source-project",
               threadId: sourceThread.id,
               projectId: sourceThread.projectId,
@@ -306,7 +306,7 @@ const makeActiveThreadStartRuntime = Effect.fn("ThreadToolkit.makeActiveRuntime"
         Effect.mapError(
           (cause) =>
             new ThreadStartToolError({
-              message: cause instanceof Error ? cause.message : "Failed to start child thread.",
+              message: "Failed to start child thread.",
               operation: "start-child-thread",
               threadId: ids.threadId,
               projectId: project.id,
@@ -357,7 +357,7 @@ const startThread = Effect.fn("ThreadToolkit.startThread")(function* (input: Thr
     Effect.mapError(
       (cause) =>
         new ThreadStartToolError({
-          message: cause.message,
+          message: "thread-management capability is not available for this session.",
           operation: "require-mcp-capability",
           cause,
         }),
