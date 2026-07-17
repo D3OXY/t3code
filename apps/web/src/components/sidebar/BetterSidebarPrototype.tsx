@@ -6,10 +6,12 @@ import {
   ArchiveIcon,
   CheckIcon,
   ChevronRightIcon,
+  CircleXIcon,
   CircleIcon,
   InboxIcon,
   LoaderIcon,
   MessageSquareWarningIcon,
+  PauseIcon,
   PlusIcon,
   SearchIcon,
   SettingsIcon,
@@ -22,7 +24,16 @@ import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { SidebarBrand } from "../Sidebar";
 import { SidebarFooter, SidebarHeader } from "../ui/sidebar";
 
-type ThreadSignal = "approval" | "input" | "running" | "plan" | "completed" | "inactive";
+type ThreadSignal =
+  | "approval"
+  | "input"
+  | "running"
+  | "connecting"
+  | "plan"
+  | "completed"
+  | "error"
+  | "interrupted"
+  | "inactive";
 type NavigatorSelection = "focus" | string;
 
 interface PrototypeThread {
@@ -44,8 +55,11 @@ const SIGNAL_PRIORITY: Record<ThreadSignal, number> = {
   approval: 6,
   input: 5,
   plan: 4,
+  error: 4,
   completed: 3,
   running: 2,
+  connecting: 2,
+  interrupted: 1,
   inactive: 1,
 };
 
@@ -101,6 +115,39 @@ function makeLoadTestProject(index: number): PrototypeProject {
               `Working through a deliberately long thread title to test truncation ${number}`,
               "running",
               41 + ageOffset,
+            ),
+          ]
+        : []),
+      ...(index % 8 === 0
+        ? [
+            mockThread(
+              key,
+              `${key}:connecting`,
+              `Connecting to the project environment ${number}`,
+              "connecting",
+              18 + ageOffset,
+            ),
+          ]
+        : []),
+      ...(index % 7 === 0
+        ? [
+            mockThread(
+              key,
+              `${key}:error`,
+              `Deployment task failed unexpectedly ${number}`,
+              "error",
+              32 + ageOffset,
+            ),
+          ]
+        : []),
+      ...(index % 6 === 0
+        ? [
+            mockThread(
+              key,
+              `${key}:interrupted`,
+              `Refactor was interrupted before completion ${number}`,
+              "interrupted",
+              70 + ageOffset,
             ),
           ]
         : []),
@@ -197,10 +244,16 @@ function signalLabel(signal: ThreadSignal): string {
       return "Waiting for you";
     case "running":
       return "Working";
+    case "connecting":
+      return "Connecting";
     case "plan":
       return "Plan ready";
     case "completed":
       return "Completed";
+    case "error":
+      return "Failed";
+    case "interrupted":
+      return "Interrupted";
     case "inactive":
       return "Inactive";
   }
@@ -213,11 +266,16 @@ function signalClasses(signal: ThreadSignal): string {
     case "input":
       return "bg-indigo-500 text-white";
     case "running":
+    case "connecting":
       return "bg-sky-500/15 text-sky-600 dark:text-sky-300";
     case "plan":
       return "bg-violet-500/15 text-violet-600 dark:text-violet-300";
     case "completed":
       return "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300";
+    case "error":
+      return "bg-red-500/15 text-red-600 dark:text-red-300";
+    case "interrupted":
+      return "bg-muted text-muted-foreground";
     case "inactive":
       return "bg-muted text-muted-foreground/65";
   }
@@ -229,11 +287,16 @@ function signalIcon(signal: ThreadSignal): ReactNode {
     case "input":
       return <MessageSquareWarningIcon className="size-3" />;
     case "running":
+    case "connecting":
       return <LoaderIcon className="size-3 animate-status-pulse" />;
     case "plan":
       return <SquarePenIcon className="size-3" />;
     case "completed":
       return <CheckIcon className="size-3" />;
+    case "error":
+      return <CircleXIcon className="size-3" />;
+    case "interrupted":
+      return <PauseIcon className="size-3" />;
     case "inactive":
       return <CircleIcon className="size-2 fill-current" />;
   }
@@ -354,7 +417,10 @@ function ProjectRail({
 }) {
   const focusCount = ALL_THREADS.filter(
     (thread) =>
-      thread.signal === "approval" || thread.signal === "input" || thread.signal === "plan",
+      thread.signal === "approval" ||
+      thread.signal === "input" ||
+      thread.signal === "plan" ||
+      thread.signal === "error",
   ).length;
 
   return (
@@ -385,6 +451,7 @@ function ProjectRail({
             (thread) =>
               thread.signal === "approval" || thread.signal === "input" || thread.signal === "plan",
           ).length;
+          const errorCount = project.threads.filter((thread) => thread.signal === "error").length;
           const updateCount = project.threads.filter(
             (thread) => thread.signal === "completed",
           ).length;
@@ -394,7 +461,7 @@ function ProjectRail({
               key={project.key}
               type="button"
               title={project.name}
-              aria-label={`${project.name}, ${actionCount} need attention, ${updateCount} completed`}
+              aria-label={`${project.name}, ${actionCount} need input, ${errorCount} failed, ${updateCount} completed`}
               onClick={() => onSelect(project.key)}
               className={`relative mx-auto flex size-9 items-center justify-center rounded-lg font-mono text-[10px] font-semibold tracking-tight transition-colors ${
                 isSelected
@@ -403,7 +470,9 @@ function ProjectRail({
               }`}
             >
               {project.monogram}
-              {actionCount > 0 ? (
+              {errorCount > 0 ? (
+                <span className="absolute -right-1 -top-1 size-2.5 rounded-full bg-red-500 ring-2 ring-inset ring-sidebar" />
+              ) : actionCount > 0 ? (
                 <span className="absolute -right-1 -top-1 size-2.5 rounded-full bg-amber-500 ring-2 ring-inset ring-sidebar" />
               ) : updateCount > 0 ? (
                 <span className="absolute -right-1 -top-1 size-2.5 rounded-full bg-emerald-500 ring-2 ring-inset ring-sidebar" />
@@ -468,7 +537,10 @@ function FocusPanel({
       thread.signal === "approval" || thread.signal === "input" || thread.signal === "plan",
   );
   const updates = ALL_THREADS.filter((thread) => thread.signal === "completed");
-  const running = ALL_THREADS.filter((thread) => thread.signal === "running");
+  const failures = ALL_THREADS.filter((thread) => thread.signal === "error");
+  const running = ALL_THREADS.filter(
+    (thread) => thread.signal === "running" || thread.signal === "connecting",
+  );
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
@@ -479,6 +551,13 @@ function FocusPanel({
           label="Action required"
           showProject
           threads={actions}
+          onSelectThread={onSelectThread}
+        />
+        <ThreadGroup
+          activeThreadKey={activeThreadKey}
+          label="Failed"
+          showProject
+          threads={failures}
           onSelectThread={onSelectThread}
         />
         <ThreadGroup
@@ -516,9 +595,14 @@ function ProjectPanel({
       thread.signal === "approval" || thread.signal === "input" || thread.signal === "plan",
   );
   const completed = project.threads.filter((thread) => thread.signal === "completed");
-  const working = project.threads.filter((thread) => thread.signal === "running");
+  const failures = project.threads.filter((thread) => thread.signal === "error");
+  const working = project.threads.filter(
+    (thread) => thread.signal === "running" || thread.signal === "connecting",
+  );
   const recent = project.threads.filter(
-    (thread) => thread.signal === "inactive" && !isOlderInactiveThread(thread),
+    (thread) =>
+      thread.signal === "interrupted" ||
+      (thread.signal === "inactive" && !isOlderInactiveThread(thread)),
   );
   const older = project.threads.filter(isOlderInactiveThread);
   const allThreadsAreOlder = project.threads.length > 0 && older.length === project.threads.length;
@@ -531,6 +615,12 @@ function ProjectPanel({
           activeThreadKey={activeThreadKey}
           label="Needs you"
           threads={actions}
+          onSelectThread={onSelectThread}
+        />
+        <ThreadGroup
+          activeThreadKey={activeThreadKey}
+          label="Failed"
+          threads={failures}
           onSelectThread={onSelectThread}
         />
         <ThreadGroup

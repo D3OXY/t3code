@@ -26,10 +26,11 @@ Priority order:
 1. Approval required.
 2. Waiting for user input.
 3. Plan ready.
-4. Completed but not viewed.
-5. Running or starting.
-6. Recent inactive.
-7. Older.
+4. Failed.
+5. Completed but not viewed.
+6. Running or starting.
+7. Interrupted or recent inactive.
+8. Older.
 
 Completed-but-not-viewed is derived from the latest completed turn being newer than the thread's last-visited timestamp.
 
@@ -37,7 +38,10 @@ The actual app exposes approval, user-input, running/starting, plan-ready, and u
 
 ## Recent and Older
 
-- Working, Completed, and Recent are separate project sections.
+- Needs you, Failed, Completed, Working, and Recent are separate project sections.
+- Error threads appear under **Failed**, below Needs you and above Completed and Working.
+- Starting/Connecting threads appear under **Working** while retaining their row-level label.
+- Interrupted threads appear under **Recent** while retaining their row-level label.
 - Completed threads remain under **Completed** regardless of age, until their status changes.
 - **Recent** contains only inactive threads newer than 72 hours.
 - **Inactive** means a thread has none of the actionable, running, plan-ready, or unseen-completion states above.
@@ -72,7 +76,7 @@ The actual app exposes approval, user-input, running/starting, plan-ready, and u
 - Use mock data only while validating this direction.
 - Include enough projects and threads to exercise both independent scroll regions.
 - Keep the distribution realistic: only occasional projects need action or contain unseen completions.
-- Cover approval, user input, plan ready, working, completed, recent inactive, and older inactive states.
+- Cover approval, user input, plan ready, connecting, working, failed, completed, interrupted, recent inactive, and older inactive states.
 - Include long titles and project names to verify truncation.
 - Include completed threads older than 72 hours to verify they remain under Completed.
 - Keep at least one project whose every thread is Older to verify default expansion.
