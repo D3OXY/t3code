@@ -4,10 +4,13 @@
  */
 import {
   ArchiveIcon,
+  ArrowUpDownIcon,
   CheckIcon,
   ChevronRightIcon,
   CircleXIcon,
   CircleIcon,
+  CloudIcon,
+  ContainerIcon,
   InboxIcon,
   LoaderIcon,
   MessageSquareWarningIcon,
@@ -22,7 +25,25 @@ import { Link } from "@tanstack/react-router";
 
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { SidebarBrand } from "../Sidebar";
+import {
+  Menu,
+  MenuCheckboxItem,
+  MenuGroup,
+  MenuPopup,
+  MenuRadioGroup,
+  MenuRadioItem,
+  MenuSeparator,
+  MenuTrigger,
+} from "../ui/menu";
+import {
+  NumberField,
+  NumberFieldDecrement,
+  NumberFieldGroup,
+  NumberFieldIncrement,
+  NumberFieldInput,
+} from "../ui/number-field";
 import { SidebarFooter, SidebarHeader } from "../ui/sidebar";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 type ThreadSignal =
   | "approval"
@@ -35,20 +56,31 @@ type ThreadSignal =
   | "interrupted"
   | "inactive";
 type NavigatorSelection = "focus" | string;
+type ProjectSortOrder = "updated_at" | "created_at" | "manual";
+type ThreadSortOrder = "updated_at" | "created_at";
+type ProjectGroupingMode = "repository" | "repository_path" | "separate";
+type ThreadLayout = "grouped" | "ungrouped";
 
 interface PrototypeThread {
   readonly key: string;
   readonly projectKey: string;
   readonly signal: ThreadSignal;
   readonly title: string;
+  readonly createdAt: string;
   readonly updatedAt: string;
 }
 
 interface PrototypeProject {
+  readonly environmentKind?: "local" | "sandbox" | "remote";
+  readonly environmentLabel?: string;
   readonly key: string;
+  readonly memberProjects?: readonly PrototypeProject[];
   readonly monogram: string;
   readonly name: string;
+  readonly repositoryKey?: string;
+  readonly repositoryPath?: string;
   readonly threads: readonly PrototypeThread[];
+  readonly workspaceRoot?: string;
 }
 
 const SIGNAL_PRIORITY: Record<ThreadSignal, number> = {
@@ -74,7 +106,14 @@ function mockThread(
   signal: ThreadSignal,
   minutesAgo: number,
 ): PrototypeThread {
-  return { key, projectKey, title, signal, updatedAt: timestampAgo(minutesAgo) };
+  return {
+    key,
+    projectKey,
+    title,
+    signal,
+    createdAt: timestampAgo(minutesAgo + 1_440 + key.length * 11),
+    updatedAt: timestampAgo(minutesAgo),
+  };
 }
 
 function sortThreads(threads: readonly PrototypeThread[]): PrototypeThread[] {
@@ -90,11 +129,24 @@ function makeLoadTestProject(index: number): PrototypeProject {
   const key = `load-test-${number}`;
   const ageOffset = index * 7;
   const actionSignal: ThreadSignal = index % 10 === 0 ? "input" : "approval";
+  const environmentKind = index % 3 === 1 ? "local" : index % 3 === 2 ? "sandbox" : "remote";
+  const environmentLabel =
+    environmentKind === "local" ? "This Mac" : environmentKind === "sandbox" ? "WSL" : "Devbox";
 
   return {
     key,
+    environmentKind,
+    environmentLabel,
     monogram: index.toString(36).toUpperCase().padStart(2, "0"),
     name: `Load Test Project ${number}`,
+    repositoryKey: `Load Test Repository ${String(Math.ceil(index / 3)).padStart(2, "0")}`,
+    repositoryPath: `packages/load-test-suite-${String(Math.ceil(index / 2)).padStart(2, "0")}`,
+    workspaceRoot:
+      environmentKind === "local"
+        ? `/Users/ishan/code/load-test-${number}`
+        : environmentKind === "sandbox"
+          ? `/home/ishan/code/load-test-${number}`
+          : `/workspace/load-test-${number}`,
     threads: sortThreads([
       ...(index % 5 === 0
         ? [
@@ -227,13 +279,79 @@ const PROJECTS: readonly PrototypeProject[] = [
 ];
 
 const ALL_THREADS = sortThreads(PROJECTS.flatMap((project) => project.threads));
-const OLDER_INACTIVE_THRESHOLD_MS = 3 * 24 * 60 * 60 * 1_000;
 
-function isOlderInactiveThread(thread: PrototypeThread): boolean {
+function isOlderInactiveThread(thread: PrototypeThread, olderAfterDays: number): boolean {
   return (
     thread.signal === "inactive" &&
-    Date.now() - Date.parse(thread.updatedAt) >= OLDER_INACTIVE_THRESHOLD_MS
+    Date.now() - Date.parse(thread.updatedAt) >= olderAfterDays * 24 * 60 * 60 * 1_000
   );
+}
+
+function sortPrototypeThreads(
+  threads: readonly PrototypeThread[],
+  sortOrder: ThreadSortOrder,
+): PrototypeThread[] {
+  const timestampKey = sortOrder === "created_at" ? "createdAt" : "updatedAt";
+  return [...threads].toSorted(
+    (left, right) => Date.parse(right[timestampKey]) - Date.parse(left[timestampKey]),
+  );
+}
+
+function projectTimestamp(project: PrototypeProject, sortOrder: ProjectSortOrder): number {
+  if (sortOrder === "manual") return 0;
+  const timestampKey = sortOrder === "created_at" ? "createdAt" : "updatedAt";
+  return Math.max(...project.threads.map((thread) => Date.parse(thread[timestampKey])));
+}
+
+function projectGroupKey(project: PrototypeProject, groupingMode: ProjectGroupingMode): string {
+  if (groupingMode === "repository") return project.repositoryKey ?? project.key;
+  if (groupingMode === "repository_path") return project.repositoryPath ?? project.key;
+  return project.key;
+}
+
+function orderPrototypeProjects(
+  projects: readonly PrototypeProject[],
+  sortOrder: ProjectSortOrder,
+  groupingMode: ProjectGroupingMode,
+): PrototypeProject[] {
+  return [...projects].toSorted((left, right) => {
+    const groupDifference = projectGroupKey(left, groupingMode).localeCompare(
+      projectGroupKey(right, groupingMode),
+    );
+    if (groupingMode !== "separate" && groupDifference !== 0) return groupDifference;
+    if (sortOrder === "manual") return 0;
+    return projectTimestamp(right, sortOrder) - projectTimestamp(left, sortOrder);
+  });
+}
+
+function groupPrototypeProjects(
+  projects: readonly PrototypeProject[],
+  groupingMode: ProjectGroupingMode,
+): PrototypeProject[] {
+  if (groupingMode === "separate") return [...projects];
+
+  const groups = new Map<string, PrototypeProject[]>();
+  for (const project of projects) {
+    const key = projectGroupKey(project, groupingMode);
+    groups.set(key, [...(groups.get(key) ?? []), project]);
+  }
+
+  return [...groups.entries()].map(([groupKey, members]) => {
+    if (members.length === 1) return members[0]!;
+    const first = members[0]!;
+    return {
+      ...(first.environmentKind ? { environmentKind: first.environmentKind } : {}),
+      ...(first.environmentLabel ? { environmentLabel: first.environmentLabel } : {}),
+      key: `group:${groupingMode}:${groupKey}`,
+      memberProjects: members.flatMap((member) => member.memberProjects ?? [member]),
+      monogram: first.monogram,
+      name: groupKey,
+      ...(first.repositoryKey ? { repositoryKey: first.repositoryKey } : {}),
+      ...(first.repositoryPath ? { repositoryPath: first.repositoryPath } : {}),
+      threads: sortThreads(members.flatMap((member) => member.threads)),
+      ...(first.workspaceRoot ? { workspaceRoot: first.workspaceRoot } : {}),
+    };
+  });
 }
 
 function signalLabel(signal: ThreadSignal): string {
@@ -408,10 +526,167 @@ function ThreadGroup({
   );
 }
 
+function PrototypeOptionsMenu({
+  foldOlder,
+  olderAfterDays,
+  projectGroupingMode,
+  projectSortOrder,
+  threadLayout,
+  threadSortOrder,
+  onFoldOlderChange,
+  onOlderAfterDaysChange,
+  onProjectGroupingModeChange,
+  onProjectSortOrderChange,
+  onThreadLayoutChange,
+  onThreadSortOrderChange,
+}: {
+  foldOlder: boolean;
+  olderAfterDays: number;
+  projectGroupingMode: ProjectGroupingMode;
+  projectSortOrder: ProjectSortOrder;
+  threadLayout: ThreadLayout;
+  threadSortOrder: ThreadSortOrder;
+  onFoldOlderChange: (fold: boolean) => void;
+  onOlderAfterDaysChange: (days: number) => void;
+  onProjectGroupingModeChange: (mode: ProjectGroupingMode) => void;
+  onProjectSortOrderChange: (order: ProjectSortOrder) => void;
+  onThreadLayoutChange: (layout: ThreadLayout) => void;
+  onThreadSortOrderChange: (order: ThreadSortOrder) => void;
+}) {
+  return (
+    <Menu>
+      <MenuTrigger
+        aria-label="Sidebar options"
+        className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted/60 text-muted-foreground/55 transition-colors hover:bg-accent hover:text-foreground"
+      >
+        <ArrowUpDownIcon className="size-3.5" />
+      </MenuTrigger>
+      <MenuPopup align="start" side="right" className="min-w-56">
+        <MenuGroup>
+          <div className="px-2 py-1 text-xs font-medium text-muted-foreground">Sort projects</div>
+          <MenuRadioGroup
+            value={projectSortOrder}
+            onValueChange={(value) => onProjectSortOrderChange(value as ProjectSortOrder)}
+          >
+            <MenuRadioItem value="updated_at">Last user message</MenuRadioItem>
+            <MenuRadioItem value="created_at">Created at</MenuRadioItem>
+            <MenuRadioItem value="manual">Manual</MenuRadioItem>
+          </MenuRadioGroup>
+        </MenuGroup>
+        <MenuGroup>
+          <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground">
+            Sort threads
+          </div>
+          <MenuRadioGroup
+            value={threadSortOrder}
+            onValueChange={(value) => onThreadSortOrderChange(value as ThreadSortOrder)}
+          >
+            <MenuRadioItem value="updated_at">Last user message</MenuRadioItem>
+            <MenuRadioItem value="created_at">Created at</MenuRadioItem>
+          </MenuRadioGroup>
+        </MenuGroup>
+        <MenuGroup>
+          <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground">
+            Thread layout
+          </div>
+          <MenuRadioGroup
+            value={threadLayout}
+            onValueChange={(value) => onThreadLayoutChange(value as ThreadLayout)}
+          >
+            <MenuRadioItem value="grouped">Grouped</MenuRadioItem>
+            <MenuRadioItem value="ungrouped">Ungrouped</MenuRadioItem>
+          </MenuRadioGroup>
+        </MenuGroup>
+        <MenuGroup>
+          <MenuCheckboxItem checked={foldOlder} onCheckedChange={onFoldOlderChange}>
+            Fold inactive threads
+          </MenuCheckboxItem>
+          {foldOlder ? (
+            <div className="flex items-center justify-between gap-3 px-2 py-1">
+              <span className="text-xs text-muted-foreground">Older than</span>
+              <NumberField
+                aria-label="Fold threads older than days"
+                className="w-24 gap-0"
+                min={1}
+                max={30}
+                value={olderAfterDays}
+                onValueChange={(value) => {
+                  if (value !== null) onOlderAfterDaysChange(Math.min(30, Math.max(1, value)));
+                }}
+                size="sm"
+              >
+                <NumberFieldGroup className="h-7">
+                  <NumberFieldDecrement className="px-1.5" />
+                  <NumberFieldInput className="w-8 px-0 text-center text-xs" />
+                  <NumberFieldIncrement className="px-1.5" />
+                </NumberFieldGroup>
+              </NumberField>
+              <span className="text-xs text-muted-foreground">days</span>
+            </div>
+          ) : null}
+        </MenuGroup>
+        <MenuSeparator />
+        <MenuGroup>
+          <div className="px-2 py-1 text-xs font-medium text-muted-foreground">Group projects</div>
+          <MenuRadioGroup
+            value={projectGroupingMode}
+            onValueChange={(value) => onProjectGroupingModeChange(value as ProjectGroupingMode)}
+          >
+            <MenuRadioItem value="repository">Group by repository</MenuRadioItem>
+            <MenuRadioItem value="repository_path">Group by repository path</MenuRadioItem>
+            <MenuRadioItem value="separate">Keep separate</MenuRadioItem>
+          </MenuRadioGroup>
+        </MenuGroup>
+      </MenuPopup>
+    </Menu>
+  );
+}
+
+function ProjectRailTooltip({ project }: { project: PrototypeProject }) {
+  const members = project.memberProjects ?? [project];
+
+  return (
+    <div className="min-w-48 max-w-72 py-0.5">
+      <div className="font-medium">{project.name}</div>
+      {members.length > 1 ? (
+        <div className="mt-0.5 text-[10px] text-muted-foreground">
+          {members.length} projects in this group
+        </div>
+      ) : null}
+      <div className="mt-2 space-y-1.5">
+        {members.map((member) => (
+          <div key={member.key} className="flex min-w-0 items-start gap-2">
+            <span className="mt-0.5 flex size-4 shrink-0 items-center justify-center text-muted-foreground">
+              {member.environmentKind === "remote" ? (
+                <CloudIcon className="size-3" />
+              ) : member.environmentKind === "sandbox" ? (
+                <ContainerIcon className="size-3" />
+              ) : (
+                <CircleIcon className="size-2 fill-current" />
+              )}
+            </span>
+            <span className="min-w-0">
+              <span className="block truncate text-[11px]">
+                {member.environmentLabel ?? "Local"}
+                {members.length > 1 ? ` — ${member.name}` : ""}
+              </span>
+              <span className="block truncate font-mono text-[9px] text-muted-foreground">
+                {member.workspaceRoot ?? member.repositoryPath ?? member.key}
+              </span>
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ProjectRail({
+  projects,
   selection,
   onSelect,
 }: {
+  projects: readonly PrototypeProject[];
   selection: NavigatorSelection;
   onSelect: (selection: NavigatorSelection) => void;
 }) {
@@ -445,7 +720,7 @@ function ProjectRail({
       <div className="my-2 h-px w-6 bg-border/70" />
 
       <div className="min-h-0 w-[calc(100%+1rem)] flex-1 self-start space-y-1 overflow-y-auto overflow-x-hidden overscroll-contain pb-1 pr-4 pt-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {PROJECTS.map((project) => {
+        {projects.map((project) => {
           const isSelected = selection === project.key;
           const actionCount = project.threads.filter(
             (thread) =>
@@ -457,30 +732,37 @@ function ProjectRail({
           ).length;
 
           return (
-            <button
-              key={project.key}
-              type="button"
-              title={project.name}
-              aria-label={`${project.name}, ${actionCount} need input, ${errorCount} failed, ${updateCount} completed`}
-              onClick={() => onSelect(project.key)}
-              className={`relative mx-auto flex size-9 items-center justify-center rounded-lg font-mono text-[10px] font-semibold tracking-tight transition-colors ${
-                isSelected
-                  ? "bg-accent text-foreground shadow-sm ring-1 ring-foreground/30 ring-offset-1 ring-offset-sidebar"
-                  : "bg-muted/35 text-muted-foreground/55 hover:bg-accent/70 hover:text-foreground"
-              }`}
-            >
-              {project.monogram}
-              {errorCount > 0 ? (
-                <span className="absolute -right-1 -top-1 size-2.5 rounded-full bg-red-500 ring-2 ring-inset ring-sidebar" />
-              ) : actionCount > 0 ? (
-                <span className="absolute -right-1 -top-1 size-2.5 rounded-full bg-amber-500 ring-2 ring-inset ring-sidebar" />
-              ) : updateCount > 0 ? (
-                <span className="absolute -right-1 -top-1 size-2.5 rounded-full bg-emerald-500 ring-2 ring-inset ring-sidebar" />
-              ) : null}
-              {isSelected ? (
-                <span className="absolute -left-1.5 h-4 w-0.5 rounded-full bg-foreground/70" />
-              ) : null}
-            </button>
+            <Tooltip key={project.key}>
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    aria-label={`${project.name}, ${actionCount} need input, ${errorCount} failed, ${updateCount} completed`}
+                    onClick={() => onSelect(project.key)}
+                    className={`relative mx-auto flex size-9 items-center justify-center rounded-lg font-mono text-[10px] font-semibold tracking-tight transition-colors ${
+                      isSelected
+                        ? "bg-accent text-foreground shadow-sm ring-1 ring-foreground/30 ring-offset-1 ring-offset-sidebar"
+                        : "bg-muted/35 text-muted-foreground/55 hover:bg-accent/70 hover:text-foreground"
+                    }`}
+                  >
+                    {project.monogram}
+                    {errorCount > 0 ? (
+                      <span className="absolute -right-1 -top-1 size-2.5 rounded-full bg-red-500 ring-2 ring-inset ring-sidebar" />
+                    ) : actionCount > 0 ? (
+                      <span className="absolute -right-1 -top-1 size-2.5 rounded-full bg-amber-500 ring-2 ring-inset ring-sidebar" />
+                    ) : updateCount > 0 ? (
+                      <span className="absolute -right-1 -top-1 size-2.5 rounded-full bg-emerald-500 ring-2 ring-inset ring-sidebar" />
+                    ) : null}
+                    {isSelected ? (
+                      <span className="absolute -left-1.5 h-4 w-0.5 rounded-full bg-foreground/70" />
+                    ) : null}
+                  </button>
+                }
+              />
+              <TooltipPopup side="right" align="start" className="whitespace-normal">
+                <ProjectRailTooltip project={project} />
+              </TooltipPopup>
+            </Tooltip>
           );
         })}
       </div>
@@ -581,68 +863,107 @@ function FocusPanel({
 
 function ProjectPanel({
   activeThreadKey,
+  foldOlder,
   onNewThread,
+  olderAfterDays,
   project,
+  threadLayout,
+  threadSortOrder,
   onSelectThread,
 }: {
   activeThreadKey: string | null;
+  foldOlder: boolean;
   onNewThread: () => void;
+  olderAfterDays: number;
   project: PrototypeProject;
+  threadLayout: ThreadLayout;
+  threadSortOrder: ThreadSortOrder;
   onSelectThread: (threadKey: string) => void;
 }) {
-  const actions = project.threads.filter(
-    (thread) =>
-      thread.signal === "approval" || thread.signal === "input" || thread.signal === "plan",
+  const bySelectedSort = (threads: readonly PrototypeThread[]) =>
+    sortPrototypeThreads(threads, threadSortOrder);
+  const actions = bySelectedSort(
+    project.threads.filter(
+      (thread) =>
+        thread.signal === "approval" || thread.signal === "input" || thread.signal === "plan",
+    ),
   );
-  const completed = project.threads.filter((thread) => thread.signal === "completed");
-  const failures = project.threads.filter((thread) => thread.signal === "error");
-  const working = project.threads.filter(
-    (thread) => thread.signal === "running" || thread.signal === "connecting",
+  const completed = bySelectedSort(
+    project.threads.filter((thread) => thread.signal === "completed"),
   );
-  const recent = project.threads.filter(
-    (thread) =>
-      thread.signal === "interrupted" ||
-      (thread.signal === "inactive" && !isOlderInactiveThread(thread)),
+  const failures = bySelectedSort(project.threads.filter((thread) => thread.signal === "error"));
+  const working = bySelectedSort(
+    project.threads.filter(
+      (thread) => thread.signal === "running" || thread.signal === "connecting",
+    ),
   );
-  const older = project.threads.filter(isOlderInactiveThread);
+  const older = foldOlder
+    ? bySelectedSort(
+        project.threads.filter((thread) => isOlderInactiveThread(thread, olderAfterDays)),
+      )
+    : [];
+  const recent = bySelectedSort(
+    project.threads.filter(
+      (thread) =>
+        thread.signal === "interrupted" ||
+        (thread.signal === "inactive" &&
+          !older.some((olderThread) => olderThread.key === thread.key)),
+    ),
+  );
+  const ungrouped = bySelectedSort(
+    project.threads.filter(
+      (thread) => !older.some((olderThread) => olderThread.key === thread.key),
+    ),
+  );
   const allThreadsAreOlder = project.threads.length > 0 && older.length === project.threads.length;
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
       <NewThreadButton projectName={project.name} onNewThread={onNewThread} />
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-2">
-        <ThreadGroup
-          activeThreadKey={activeThreadKey}
-          label="Needs you"
-          threads={actions}
-          onSelectThread={onSelectThread}
-        />
-        <ThreadGroup
-          activeThreadKey={activeThreadKey}
-          label="Failed"
-          threads={failures}
-          onSelectThread={onSelectThread}
-        />
-        <ThreadGroup
-          activeThreadKey={activeThreadKey}
-          label="Completed"
-          threads={completed}
-          onSelectThread={onSelectThread}
-        />
-        <ThreadGroup
-          activeThreadKey={activeThreadKey}
-          label="Working"
-          threads={working}
-          onSelectThread={onSelectThread}
-        />
-        <ThreadGroup
-          activeThreadKey={activeThreadKey}
-          label="Recent"
-          threads={recent}
-          onSelectThread={onSelectThread}
-        />
+        {threadLayout === "ungrouped" ? (
+          <ThreadGroup
+            activeThreadKey={activeThreadKey}
+            label="Threads"
+            threads={ungrouped}
+            onSelectThread={onSelectThread}
+          />
+        ) : (
+          <>
+            <ThreadGroup
+              activeThreadKey={activeThreadKey}
+              label="Needs you"
+              threads={actions}
+              onSelectThread={onSelectThread}
+            />
+            <ThreadGroup
+              activeThreadKey={activeThreadKey}
+              label="Failed"
+              threads={failures}
+              onSelectThread={onSelectThread}
+            />
+            <ThreadGroup
+              activeThreadKey={activeThreadKey}
+              label="Completed"
+              threads={completed}
+              onSelectThread={onSelectThread}
+            />
+            <ThreadGroup
+              activeThreadKey={activeThreadKey}
+              label="Working"
+              threads={working}
+              onSelectThread={onSelectThread}
+            />
+            <ThreadGroup
+              activeThreadKey={activeThreadKey}
+              label="Recent"
+              threads={recent}
+              onSelectThread={onSelectThread}
+            />
+          </>
+        )}
 
-        {older.length > 0 ? (
+        {foldOlder && older.length > 0 ? (
           <details
             className="group mx-2 mb-2 border-t border-border/60 pt-1"
             open={allThreadsAreOlder}
@@ -672,7 +993,15 @@ function ProjectPanel({
 export function BetterSidebarPrototype() {
   const [selection, setSelection] = useState<NavigatorSelection>("focus");
   const [activeThreadKey, setActiveThreadKey] = useState<string | null>("acme:billing");
-  const selectedProject = PROJECTS.find((project) => project.key === selection) ?? null;
+  const [projectSortOrder, setProjectSortOrder] = useState<ProjectSortOrder>("updated_at");
+  const [threadSortOrder, setThreadSortOrder] = useState<ThreadSortOrder>("updated_at");
+  const [projectGroupingMode, setProjectGroupingMode] = useState<ProjectGroupingMode>("repository");
+  const [threadLayout, setThreadLayout] = useState<ThreadLayout>("grouped");
+  const [foldOlder, setFoldOlder] = useState(true);
+  const [olderAfterDays, setOlderAfterDays] = useState(3);
+  const orderedProjects = orderPrototypeProjects(PROJECTS, projectSortOrder, projectGroupingMode);
+  const railProjects = groupPrototypeProjects(orderedProjects, projectGroupingMode);
+  const selectedProject = railProjects.find((project) => project.key === selection) ?? null;
 
   return (
     <>
@@ -680,22 +1009,40 @@ export function BetterSidebarPrototype() {
         <SidebarBrand />
       </SidebarHeader>
 
-      <div className="border-b border-border/60 p-2">
-        <div className="flex h-7 items-center gap-2 rounded-md bg-muted/50 px-2 text-[11px] text-muted-foreground/55">
+      <div className="flex gap-1.5 border-b border-border/60 p-2">
+        <div className="flex h-7 min-w-0 flex-1 items-center gap-2 rounded-md bg-muted/50 px-2 text-[11px] text-muted-foreground/55">
           <SearchIcon className="size-3.5" />
           Find anything
           <span className="ml-auto font-mono text-[9px] opacity-60">⌘K</span>
         </div>
+        <PrototypeOptionsMenu
+          foldOlder={foldOlder}
+          olderAfterDays={olderAfterDays}
+          projectGroupingMode={projectGroupingMode}
+          projectSortOrder={projectSortOrder}
+          threadLayout={threadLayout}
+          threadSortOrder={threadSortOrder}
+          onFoldOlderChange={setFoldOlder}
+          onOlderAfterDaysChange={setOlderAfterDays}
+          onProjectGroupingModeChange={setProjectGroupingMode}
+          onProjectSortOrderChange={setProjectSortOrder}
+          onThreadLayoutChange={setThreadLayout}
+          onThreadSortOrderChange={setThreadSortOrder}
+        />
       </div>
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <div className="grid h-full min-h-0 flex-1 grid-cols-[3.25rem_minmax(0,1fr)] overflow-hidden">
-          <ProjectRail selection={selection} onSelect={setSelection} />
+          <ProjectRail projects={railProjects} selection={selection} onSelect={setSelection} />
           {selectedProject ? (
             <ProjectPanel
               activeThreadKey={activeThreadKey}
+              foldOlder={foldOlder}
               onNewThread={() => setActiveThreadKey(null)}
+              olderAfterDays={olderAfterDays}
               project={selectedProject}
+              threadLayout={threadLayout}
+              threadSortOrder={threadSortOrder}
               onSelectThread={setActiveThreadKey}
             />
           ) : (
