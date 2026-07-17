@@ -2757,7 +2757,7 @@ const SidebarChromeHeader = memo(function SidebarChromeHeader({
   );
 });
 
-function SidebarBrand() {
+export function SidebarBrand() {
   const stageLabel = useSidebarStageLabel();
 
   return (
