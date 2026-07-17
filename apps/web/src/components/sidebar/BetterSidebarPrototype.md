@@ -14,7 +14,10 @@
 - Project views show only that project's threads.
 - Old, irrelevant work stays accessible without being visually prominent.
 - The project rail and divider stretch through the full content height to the footer.
-- Project and thread lists scroll independently without scroll chaining. Focus and Archived stay pinned in the project rail; New thread stays pinned above the thread list.
+- Project and thread lists scroll independently without scroll chaining.
+- Focus and Archived stay pinned in the project rail.
+- New thread stays pinned above the thread list.
+- The project rail remains scrollable, but its scrollbar is hidden.
 
 ## Priority and status rules
 
@@ -55,9 +58,24 @@ The actual app exposes approval, user-input, running/starting, plan-ready, and u
 - Reuse the actual production T3 Code sidebar branding component.
 - Do not recreate or approximate the logo, Code label, or stage badge.
 - Project rail badges indicate attention or completed work.
+- Every project tile has a subtle background so its hit area remains legible.
+- The active project uses a restrained foreground ring and small offset.
+- Project status indicators sit at the tile's outer top-right without clipping.
 - Needs-input threads must be immediately distinguishable and highest priority.
 - Completed-but-unviewed threads must be easy to identify.
+- Thread status icons are vertically centered against the complete two-line row.
+- Thread titles, timestamps, project names, and status labels truncate instead of wrapping.
 - Dense, utilitarian hierarchy; status is communicated through ordering, labels, and restrained color.
+
+## Prototype data
+
+- Use mock data only while validating this direction.
+- Include enough projects and threads to exercise both independent scroll regions.
+- Keep the distribution realistic: only occasional projects need action or contain unseen completions.
+- Cover approval, user input, plan ready, working, completed, recent inactive, and older inactive states.
+- Include long titles and project names to verify truncation.
+- Include completed threads older than 72 hours to verify they remain under Completed.
+- Keep at least one project whose every thread is Older to verify default expansion.
 
 ## Production follow-up
 

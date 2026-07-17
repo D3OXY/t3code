@@ -75,54 +75,46 @@ function makeLoadTestProject(index: number): PrototypeProject {
   const number = String(index).padStart(2, "0");
   const key = `load-test-${number}`;
   const ageOffset = index * 7;
+  const actionSignal: ThreadSignal = index % 10 === 0 ? "input" : "approval";
 
   return {
     key,
     monogram: index.toString(36).toUpperCase().padStart(2, "0"),
     name: `Load Test Project ${number}`,
     threads: sortThreads([
-      mockThread(
-        key,
-        `${key}:approval`,
-        `Approve deployment access for environment ${number}`,
-        "approval",
-        2 + ageOffset,
-      ),
-      mockThread(
-        key,
-        `${key}:input`,
-        `Choose an approach for the multi-region migration ${number}`,
-        "input",
-        9 + ageOffset,
-      ),
-      mockThread(
-        key,
-        `${key}:plan`,
-        `Review the proposed implementation plan ${number}`,
-        "plan",
-        24 + ageOffset,
-      ),
-      mockThread(
-        key,
-        `${key}:working`,
-        `Working through a deliberately long thread title to test truncation ${number}`,
-        "running",
-        41 + ageOffset,
-      ),
-      mockThread(
-        key,
-        `${key}:completed`,
-        `Completed result waiting to be reviewed ${number}`,
-        "completed",
-        90 + ageOffset,
-      ),
-      mockThread(
-        key,
-        `${key}:completed-old`,
-        `Completed more than three days ago ${number}`,
-        "completed",
-        5_000 + ageOffset,
-      ),
+      ...(index % 5 === 0
+        ? [
+            mockThread(
+              key,
+              `${key}:action`,
+              `Resolve a pending project decision ${number}`,
+              actionSignal,
+              9 + ageOffset,
+            ),
+          ]
+        : []),
+      ...(index % 4 === 0
+        ? [
+            mockThread(
+              key,
+              `${key}:working`,
+              `Working through a deliberately long thread title to test truncation ${number}`,
+              "running",
+              41 + ageOffset,
+            ),
+          ]
+        : []),
+      ...(index % 3 === 0
+        ? [
+            mockThread(
+              key,
+              `${key}:completed`,
+              `Completed result waiting to be reviewed ${number}`,
+              "completed",
+              index % 9 === 0 ? 5_000 + ageOffset : 90 + ageOffset,
+            ),
+          ]
+        : []),
       mockThread(
         key,
         `${key}:recent`,
@@ -184,7 +176,7 @@ const PROJECTS: readonly PrototypeProject[] = [
       mockThread("old-lab", "lab:wasm", "WASM runtime experiment", "inactive", 129_600),
     ]),
   },
-  ...Array.from({ length: 36 }, (_, index) => makeLoadTestProject(index + 1)),
+  ...Array.from({ length: 18 }, (_, index) => makeLoadTestProject(index + 1)),
 ];
 
 const ALL_THREADS = sortThreads(PROJECTS.flatMap((project) => project.threads));
@@ -273,7 +265,7 @@ function ThreadRow({
       }`}
     >
       <span
-        className={`mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md ${signalClasses(thread.signal)}`}
+        className={`flex size-5 shrink-0 self-center items-center justify-center rounded-md ${signalClasses(thread.signal)}`}
       >
         {signalIcon(thread.signal)}
       </span>
@@ -296,9 +288,9 @@ function ThreadRow({
             </>
           ) : null}
           <span
-            className={
+            className={`min-w-0 truncate whitespace-nowrap ${
               thread.signal === "inactive" ? "text-muted-foreground/45" : "text-foreground/60"
-            }
+            }`}
           >
             {signalLabel(thread.signal)}
           </span>
@@ -386,7 +378,7 @@ function ProjectRail({
 
       <div className="my-2 h-px w-6 bg-border/70" />
 
-      <div className="min-h-0 w-full flex-1 space-y-1 overflow-y-auto overflow-x-hidden overscroll-contain px-0.5 pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div className="min-h-0 w-[calc(100%+1rem)] flex-1 self-start space-y-1 overflow-y-auto overflow-x-hidden overscroll-contain pb-1 pr-4 pt-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {PROJECTS.map((project) => {
           const isSelected = selection === project.key;
           const actionCount = project.threads.filter(
@@ -406,15 +398,15 @@ function ProjectRail({
               onClick={() => onSelect(project.key)}
               className={`relative mx-auto flex size-9 items-center justify-center rounded-lg font-mono text-[10px] font-semibold tracking-tight transition-colors ${
                 isSelected
-                  ? "bg-accent text-foreground shadow-sm ring-1 ring-border"
-                  : "text-muted-foreground/55 hover:bg-accent/70 hover:text-foreground"
+                  ? "bg-accent text-foreground shadow-sm ring-1 ring-foreground/30 ring-offset-1 ring-offset-sidebar"
+                  : "bg-muted/35 text-muted-foreground/55 hover:bg-accent/70 hover:text-foreground"
               }`}
             >
               {project.monogram}
               {actionCount > 0 ? (
-                <span className="absolute right-1 top-0.5 size-2.5 rounded-full bg-amber-500 ring-2 ring-sidebar" />
+                <span className="absolute -right-1 -top-1 size-2.5 rounded-full bg-amber-500 ring-2 ring-inset ring-sidebar" />
               ) : updateCount > 0 ? (
-                <span className="absolute right-1 top-0.5 size-2.5 rounded-full bg-emerald-500 ring-2 ring-sidebar" />
+                <span className="absolute -right-1 -top-1 size-2.5 rounded-full bg-emerald-500 ring-2 ring-inset ring-sidebar" />
               ) : null}
               {isSelected ? (
                 <span className="absolute -left-1.5 h-4 w-0.5 rounded-full bg-foreground/70" />
