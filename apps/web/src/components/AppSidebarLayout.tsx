@@ -9,8 +9,6 @@ import { primaryServerKeybindingsAtom } from "../state/server";
 import ThreadSidebar from "./Sidebar";
 import { Sidebar, SidebarProvider, SidebarRail, SidebarTrigger, useSidebar } from "./ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
-import { BetterSidebarPrototype } from "./sidebar/BetterSidebarPrototype";
-import { useLocation } from "@tanstack/react-router";
 
 const THREAD_SIDEBAR_WIDTH_STORAGE_KEY = "chat_thread_sidebar_width";
 const THREAD_SIDEBAR_DEFAULT_WIDTH = 20 * 16;
@@ -58,10 +56,6 @@ function SidebarControl() {
 
 export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
-  const prototypeSearch = useLocation({ select: (location) => location.search }) as Readonly<
-    Record<string, unknown>
-  >;
-  const prototypeEnabled = !import.meta.env.PROD && prototypeSearch.prototype === "better-sidebar";
   const isMacosDesktop = isElectron && isMacPlatform(navigator.platform);
   const [isWindowFullscreen, setIsWindowFullscreen] = useState(() => {
     const getWindowFullscreenState = window.desktopBridge?.getWindowFullscreenState;
@@ -125,7 +119,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
           storageKey: THREAD_SIDEBAR_WIDTH_STORAGE_KEY,
         }}
       >
-        {prototypeEnabled ? <BetterSidebarPrototype /> : <ThreadSidebar />}
+        <ThreadSidebar />
         <SidebarRail />
       </Sidebar>
       {children}
