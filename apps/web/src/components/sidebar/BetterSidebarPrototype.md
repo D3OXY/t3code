@@ -98,6 +98,11 @@ Available app data:
 - Completed-but-unviewed threads must be easy to identify.
 - Thread status icons are vertically centered against the complete two-line row.
 - Thread titles, timestamps, project names, and status labels truncate instead of wrapping.
+- Truncated thread titles use the shared tooltip on hover/focus.
+- Thread rows can show PR state, worktree, running-terminal, discovered-port, and remote-environment indicators with tooltips.
+- Double-clicking a thread title/row starts inline rename; Enter or blur commits and Escape cancels.
+- Thread context menus expose Rename, Mark unread, Copy Path, Copy Thread ID, and Delete.
+- Multi-select is omitted from this prototype; production currently uses it only for bulk Mark unread and Delete.
 - Dense, utilitarian hierarchy; status is communicated through ordering, labels, and restrained color.
 
 ## Prototype data

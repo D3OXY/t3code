@@ -11,6 +11,9 @@ import {
   CircleIcon,
   CloudIcon,
   ContainerIcon,
+  FolderGit2Icon,
+  GitPullRequestIcon,
+  Globe2Icon,
   InboxIcon,
   LoaderIcon,
   MessageSquareWarningIcon,
@@ -19,6 +22,7 @@ import {
   SearchIcon,
   SettingsIcon,
   SquarePenIcon,
+  TerminalIcon,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
@@ -128,7 +132,6 @@ function makeLoadTestProject(index: number): PrototypeProject {
   const number = String(index).padStart(2, "0");
   const key = `load-test-${number}`;
   const ageOffset = index * 7;
-  const actionSignal: ThreadSignal = index % 10 === 0 ? "input" : "approval";
   const environmentKind = index % 3 === 1 ? "local" : index % 3 === 2 ? "sandbox" : "remote";
   const environmentLabel =
     environmentKind === "local" ? "This Mac" : environmentKind === "sandbox" ? "WSL" : "Devbox";
@@ -148,17 +151,6 @@ function makeLoadTestProject(index: number): PrototypeProject {
           ? `/home/ishan/code/load-test-${number}`
           : `/workspace/load-test-${number}`,
     threads: sortThreads([
-      ...(index % 5 === 0
-        ? [
-            mockThread(
-              key,
-              `${key}:action`,
-              `Resolve a pending project decision ${number}`,
-              actionSignal,
-              9 + ageOffset,
-            ),
-          ]
-        : []),
       ...(index % 4 === 0
         ? [
             mockThread(
@@ -203,17 +195,6 @@ function makeLoadTestProject(index: number): PrototypeProject {
             ),
           ]
         : []),
-      ...(index % 3 === 0
-        ? [
-            mockThread(
-              key,
-              `${key}:completed`,
-              `Completed result waiting to be reviewed ${number}`,
-              "completed",
-              index % 9 === 0 ? 5_000 + ageOffset : 90 + ageOffset,
-            ),
-          ]
-        : []),
       mockThread(
         key,
         `${key}:recent`,
@@ -234,9 +215,14 @@ function makeLoadTestProject(index: number): PrototypeProject {
 
 const PROJECTS: readonly PrototypeProject[] = [
   {
+    environmentKind: "local",
+    environmentLabel: "This Mac",
     key: "t3code",
     monogram: "T3",
     name: "t3code",
+    repositoryKey: "t3code",
+    repositoryPath: "oss/t3code",
+    workspaceRoot: "/Users/ishan/code/oss/t3code",
     threads: sortThreads([
       mockThread("t3code", "t3code:approval", "Approve filesystem access", "approval", 3),
       mockThread("t3code", "t3code:reconnect", "Fix reconnect race condition", "running", 7),
@@ -246,9 +232,14 @@ const PROJECTS: readonly PrototypeProject[] = [
     ]),
   },
   {
+    environmentKind: "remote",
+    environmentLabel: "Devbox",
     key: "acme-dashboard",
     monogram: "AC",
     name: "Acme Dashboard",
+    repositoryKey: "acme-dashboard",
+    repositoryPath: "work/acme-dashboard",
+    workspaceRoot: "/workspace/acme-dashboard",
     threads: sortThreads([
       mockThread("acme-dashboard", "acme:billing", "Choose billing migration path", "input", 1),
       mockThread("acme-dashboard", "acme:checkout", "Review checkout redesign plan", "plan", 22),
@@ -257,12 +248,17 @@ const PROJECTS: readonly PrototypeProject[] = [
     ]),
   },
   {
+    environmentKind: "sandbox",
+    environmentLabel: "WSL",
     key: "mobile-sync",
     monogram: "MO",
     name: "mobile-sync",
+    repositoryKey: "mobile-sync",
+    repositoryPath: "apps/mobile-sync",
+    workspaceRoot: "/home/ishan/code/mobile-sync",
     threads: sortThreads([
       mockThread("mobile-sync", "mobile:offline", "Implement offline queue", "running", 11),
-      mockThread("mobile-sync", "mobile:conflicts", "Resolve sync conflicts", "completed", 33),
+      mockThread("mobile-sync", "mobile:conflicts", "Resolve sync conflicts", "inactive", 33),
       mockThread("mobile-sync", "mobile:push", "Push notification spike", "inactive", 10_080),
     ]),
   },
@@ -437,7 +433,40 @@ function ThreadRow({
 }) {
   const [isConfirmingArchive, setIsConfirmingArchive] = useState(false);
   const [isArchived, setIsArchived] = useState(false);
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [isUnread, setIsUnread] = useState(false);
+  const [title, setTitle] = useState(thread.title);
+  const [draftTitle, setDraftTitle] = useState(thread.title);
+  const [contextMenuPosition, setContextMenuPosition] = useState<{ x: number; y: number } | null>(
+    null,
+  );
   const canArchive = thread.signal !== "running" && thread.signal !== "connecting";
+  const indicatorSeed = [...thread.key].reduce(
+    (sum, character) => sum + character.charCodeAt(0),
+    0,
+  );
+  const prState =
+    thread.signal === "completed"
+      ? "merged"
+      : thread.signal === "plan" || indicatorSeed % 4 === 0
+        ? "open"
+        : null;
+  const hasRunningTerminal = thread.signal === "running" && indicatorSeed % 2 === 0;
+  const discoveredPort =
+    thread.signal === "running" && indicatorSeed % 3 === 0 ? 3000 + (indicatorSeed % 100) : null;
+  const threadProject = PROJECTS.find((project) => project.key === thread.projectKey);
+  const isRemoteThread = threadProject?.environmentKind === "remote";
+  const worktreePath =
+    indicatorSeed % 3 === 0
+      ? `${threadProject?.workspaceRoot ?? "/workspace"}/.worktrees/${thread.key.split(":").at(-1) ?? "thread"}`
+      : null;
+  const worktreeBranch = worktreePath ? `feat/${thread.key.split(":").at(-1) ?? "thread"}` : null;
+  const commitRename = () => {
+    const trimmedTitle = draftTitle.trim();
+    if (trimmedTitle) setTitle(trimmedTitle);
+    setDraftTitle(trimmedTitle || title);
+    setIsRenaming(false);
+  };
 
   if (isArchived) return null;
 
@@ -446,6 +475,16 @@ function ThreadRow({
       role="button"
       tabIndex={0}
       onClick={onSelect}
+      onDoubleClick={(event) => {
+        if ((event.target as HTMLElement).closest("button, input")) return;
+        event.preventDefault();
+        setDraftTitle(title);
+        setIsRenaming(true);
+      }}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        setContextMenuPosition({ x: event.clientX, y: event.clientY });
+      }}
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") onSelect();
       }}
@@ -466,11 +505,109 @@ function ThreadRow({
       </span>
       <span className="min-w-0 flex-1">
         <span className="flex min-w-0 items-center gap-2">
-          <span className="min-w-0 flex-1 truncate text-xs font-medium leading-4">
-            {thread.title}
-          </span>
-          <span className="shrink-0 font-mono text-[9px] tabular-nums text-muted-foreground/45 transition-opacity group-hover/thread:opacity-0 group-focus-within/thread:opacity-0">
-            {formatRelativeTimeLabel(thread.updatedAt)}
+          {isRenaming ? (
+            <input
+              autoFocus
+              value={draftTitle}
+              className="h-5 min-w-0 flex-1 rounded border border-ring bg-transparent px-1 text-xs outline-none"
+              onChange={(event) => setDraftTitle(event.target.value)}
+              onClick={(event) => event.stopPropagation()}
+              onDoubleClick={(event) => event.stopPropagation()}
+              onBlur={commitRename}
+              onKeyDown={(event) => {
+                event.stopPropagation();
+                if (event.key === "Enter") commitRename();
+                if (event.key === "Escape") {
+                  setDraftTitle(title);
+                  setIsRenaming(false);
+                }
+              }}
+            />
+          ) : (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <span className="min-w-0 flex-1 truncate text-xs font-medium leading-4">
+                    {isUnread ? <span className="mr-1 text-sky-500">●</span> : null}
+                    {title}
+                  </span>
+                }
+              />
+              <TooltipPopup side="top" className="max-w-80 whitespace-normal leading-tight">
+                {title}
+              </TooltipPopup>
+            </Tooltip>
+          )}
+          <span className="flex shrink-0 items-center gap-1.5 text-muted-foreground/45">
+            {prState ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <span
+                      role="img"
+                      aria-label={`PR ${prState}`}
+                      className={prState === "merged" ? "text-violet-500" : "text-emerald-500"}
+                    />
+                  }
+                >
+                  <GitPullRequestIcon className="size-3" />
+                </TooltipTrigger>
+                <TooltipPopup side="top">PR {prState}</TooltipPopup>
+              </Tooltip>
+            ) : null}
+            {worktreePath ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={<span role="img" aria-label={`Worktree: ${worktreePath}`} />}
+                >
+                  <FolderGit2Icon className="size-3" />
+                </TooltipTrigger>
+                <TooltipPopup side="top">
+                  Worktree: {worktreePath} ({worktreeBranch})
+                </TooltipPopup>
+              </Tooltip>
+            ) : null}
+            {hasRunningTerminal ? (
+              <Tooltip>
+                <TooltipTrigger render={<span role="img" aria-label="Terminal process running" />}>
+                  <TerminalIcon className="size-3 animate-status-pulse text-teal-500" />
+                </TooltipTrigger>
+                <TooltipPopup side="top">Terminal process running</TooltipPopup>
+              </Tooltip>
+            ) : null}
+            {discoveredPort ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={<span role="img" aria-label={`Open localhost:${discoveredPort}`} />}
+                >
+                  <Globe2Icon className="size-3 text-emerald-500" />
+                </TooltipTrigger>
+                <TooltipPopup side="top">Open localhost:{discoveredPort}</TooltipPopup>
+              </Tooltip>
+            ) : null}
+            {isRemoteThread ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <span role="img" aria-label={threadProject?.environmentLabel ?? "Remote"} />
+                  }
+                >
+                  <CloudIcon className="size-3" />
+                </TooltipTrigger>
+                <TooltipPopup side="top">
+                  {threadProject?.environmentLabel ?? "Remote"}
+                </TooltipPopup>
+              </Tooltip>
+            ) : null}
+            <span
+              className={`font-mono text-[9px] tabular-nums ${
+                canArchive
+                  ? "transition-opacity group-hover/thread:opacity-0 group-focus-within/thread:opacity-0"
+                  : ""
+              }`}
+            >
+              {formatRelativeTimeLabel(thread.updatedAt)}
+            </span>
           </span>
         </span>
         <span className="mt-0.5 flex items-center gap-1.5 text-[10px] leading-3.5">
@@ -529,6 +666,81 @@ function ThreadRow({
       ) : null}
       {active ? (
         <span className="absolute inset-y-2 left-0 w-0.5 rounded-full bg-foreground/65" />
+      ) : null}
+      {contextMenuPosition ? (
+        <>
+          <button
+            type="button"
+            aria-label="Close thread context menu"
+            className="fixed inset-0 z-40 cursor-default"
+            onClick={(event) => {
+              event.stopPropagation();
+              setContextMenuPosition(null);
+            }}
+          />
+          <div
+            role="menu"
+            className="fixed z-50 min-w-40 rounded-md border bg-popover p-1 text-[11px] text-popover-foreground shadow-md"
+            style={{ left: contextMenuPosition.x, top: contextMenuPosition.y }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              role="menuitem"
+              className="block w-full rounded px-2 py-1.5 text-left hover:bg-accent"
+              onClick={() => {
+                setDraftTitle(title);
+                setIsRenaming(true);
+                setContextMenuPosition(null);
+              }}
+            >
+              Rename thread
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="block w-full rounded px-2 py-1.5 text-left hover:bg-accent"
+              onClick={() => {
+                setIsUnread(true);
+                setContextMenuPosition(null);
+              }}
+            >
+              Mark unread
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="block w-full rounded px-2 py-1.5 text-left hover:bg-accent"
+              onClick={() => {
+                void navigator.clipboard.writeText(
+                  threadProject?.workspaceRoot ?? thread.projectKey,
+                );
+                setContextMenuPosition(null);
+              }}
+            >
+              Copy Path
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="block w-full rounded px-2 py-1.5 text-left hover:bg-accent"
+              onClick={() => {
+                void navigator.clipboard.writeText(thread.key);
+                setContextMenuPosition(null);
+              }}
+            >
+              Copy Thread ID
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="block w-full rounded px-2 py-1.5 text-left text-destructive hover:bg-destructive/10"
+              onClick={() => setIsArchived(true)}
+            >
+              Delete
+            </button>
+          </div>
+        </>
       ) : null}
     </div>
   );
