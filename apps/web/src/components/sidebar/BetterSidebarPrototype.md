@@ -61,6 +61,8 @@ Available app data:
 - Replace the Focus heading/summary area with a prominent **New thread** button.
 - Every project view has the same button with project context, such as “in t3code.”
 - Archived is an icon pinned to the bottom of the project rail.
+- Non-working thread rows reveal Archive on hover/focus; the first activation changes it to Confirm, and confirmation archives the thread.
+- Leaving the row or moving focus outside cancels archive confirmation.
 - Settings remains in the footer.
 - The sidebar-options trigger sits beside, but outside, the search field in its own background.
 

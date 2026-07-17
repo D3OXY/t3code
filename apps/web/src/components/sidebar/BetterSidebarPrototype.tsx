@@ -435,11 +435,25 @@ function ThreadRow({
   thread: PrototypeThread;
   onSelect: () => void;
 }) {
+  const [isConfirmingArchive, setIsConfirmingArchive] = useState(false);
+  const [isArchived, setIsArchived] = useState(false);
+  const canArchive = thread.signal !== "running" && thread.signal !== "connecting";
+
+  if (isArchived) return null;
+
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onSelect}
-      className={`group relative flex w-full min-w-0 gap-2.5 rounded-lg px-2 py-2 text-left transition-colors ${
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") onSelect();
+      }}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setIsConfirmingArchive(false);
+      }}
+      onMouseLeave={() => setIsConfirmingArchive(false)}
+      className={`group/thread relative flex w-full min-w-0 gap-2.5 rounded-lg px-2 py-2 text-left transition-colors ${
         active
           ? "bg-accent text-foreground shadow-sm"
           : "text-muted-foreground hover:bg-accent/65 hover:text-foreground"
@@ -455,7 +469,7 @@ function ThreadRow({
           <span className="min-w-0 flex-1 truncate text-xs font-medium leading-4">
             {thread.title}
           </span>
-          <span className="shrink-0 font-mono text-[9px] tabular-nums text-muted-foreground/45">
+          <span className="shrink-0 font-mono text-[9px] tabular-nums text-muted-foreground/45 transition-opacity group-hover/thread:opacity-0 group-focus-within/thread:opacity-0">
             {formatRelativeTimeLabel(thread.updatedAt)}
           </span>
         </span>
@@ -477,10 +491,46 @@ function ThreadRow({
           </span>
         </span>
       </span>
+      {canArchive ? (
+        isConfirmingArchive ? (
+          <button
+            type="button"
+            aria-label={`Confirm archive ${thread.title}`}
+            className="absolute top-1/2 right-1.5 z-10 h-6 -translate-y-1/2 rounded-md bg-destructive/12 px-2 text-[9px] font-medium text-destructive transition-colors hover:bg-destructive/18 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-destructive/40"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              setIsArchived(true);
+            }}
+          >
+            Confirm
+          </button>
+        ) : (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  aria-label={`Archive ${thread.title}`}
+                  className="absolute top-1/2 right-1.5 z-10 flex size-6 -translate-y-1/2 items-center justify-center rounded-md bg-accent text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring group-hover/thread:opacity-100 group-focus-within/thread:opacity-100"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setIsConfirmingArchive(true);
+                  }}
+                >
+                  <ArchiveIcon className="size-3.5" />
+                </button>
+              }
+            />
+            <TooltipPopup side="top">Archive</TooltipPopup>
+          </Tooltip>
+        )
+      ) : null}
       {active ? (
         <span className="absolute inset-y-2 left-0 w-0.5 rounded-full bg-foreground/65" />
       ) : null}
-    </button>
+    </div>
   );
 }
 
