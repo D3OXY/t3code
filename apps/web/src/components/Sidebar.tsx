@@ -247,6 +247,31 @@ const SIDEBAR_ICON_ACTION_BUTTON_CLASS =
   "inline-flex h-6 min-w-6 cursor-pointer items-center justify-center rounded-md px-[calc(--spacing(1)-1px)] text-muted-foreground/60 hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring";
 const SIDEBAR_UNGROUPED_ACTIVE_ORDER = -10;
 
+function useAutoHideScrollbar() {
+  const [isScrolling, setIsScrolling] = useState(false);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (timeoutRef.current !== null) clearTimeout(timeoutRef.current);
+    },
+    [],
+  );
+
+  const handleScroll = useCallback(() => {
+    setIsScrolling(true);
+    if (timeoutRef.current !== null) clearTimeout(timeoutRef.current);
+    timeoutRef.current = setTimeout(() => setIsScrolling(false), 500);
+  }, []);
+
+  return {
+    handleScroll,
+    scrollbarClassName: isScrolling
+      ? "[scrollbar-color:color-mix(in_srgb,var(--foreground)_20%,transparent)_transparent] [&::-webkit-scrollbar-thumb]:bg-foreground/20"
+      : "[scrollbar-color:transparent_transparent] [&::-webkit-scrollbar-thumb]:bg-transparent",
+  };
+}
+
 type SidebarThreadSection = "needs" | "failed" | "completed" | "working" | "recent" | "older";
 type SidebarProjectRailStatus = "failed" | "needs" | "completed" | "working";
 type SidebarFocusSectionCounts = Record<"needs" | "failed" | "completed" | "working", number>;
@@ -985,7 +1010,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
                   data-thread-selection-safe
                   data-testid={`thread-archive-${thread.id}`}
                   aria-label={`Archive ${thread.title}`}
-                  className="absolute top-1/2 right-1.5 z-10 flex size-6 -translate-y-1/2 items-center justify-center rounded-md bg-accent text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring group-hover/thread:opacity-100 group-focus-within/thread:opacity-100"
+                  className="absolute top-1/2 right-1.5 z-10 flex size-6 -translate-y-1/2 items-center justify-center rounded-md bg-accent text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring group-hover/thread:opacity-100 group-focus-within/thread:opacity-100 max-sm:opacity-100"
                   onPointerDown={stopPropagationOnPointerDown}
                   onClick={
                     appSettingsConfirmThreadArchive
@@ -1102,6 +1127,23 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
     projectDisplayName,
     showProject,
   } = props;
+  const { handleScroll, scrollbarClassName } = useAutoHideScrollbar();
+  const focusThreads = showProject
+    ? renderedThreads.filter((thread) => {
+        const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+        if (threadKey === activeRouteThreadKey) return true;
+        const section = getSidebarThreadSection({
+          thread,
+          status: threadStatusByKey.get(threadKey) ?? null,
+          foldOlder: false,
+          olderAfterDays,
+        });
+        return isSidebarFocusGroupedSection(section);
+      })
+    : [];
+  const selectionOrder = showProject
+    ? focusThreads.map((thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)))
+    : orderedProjectThreadKeys;
   const renderThread = (thread: SidebarThreadSummary) => {
     const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
     const section = getSidebarThreadSection({
@@ -1122,7 +1164,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
         projectDisplayName={projectDisplayNameByThreadKey.get(threadKey) ?? projectDisplayName}
         showProject={showProject}
         {...(showProject ? { focusOrder } : {})}
-        orderedProjectThreadKeys={orderedProjectThreadKeys}
+        orderedProjectThreadKeys={selectionOrder}
         isActive={activeRouteThreadKey === threadKey}
         jumpLabel={threadJumpLabelByKey.get(threadKey) ?? null}
         appSettingsConfirmThreadArchive={appSettingsConfirmThreadArchive}
@@ -1181,21 +1223,13 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
       }) === "older"
     );
   });
+  const [olderThreadsOpen, setOlderThreadsOpen] = useState(
+    olderThreads.length > 0 && olderThreads.length === renderedThreads.length,
+  );
 
   if (!shouldShowThreadPanel) return null;
 
   if (showProject) {
-    const focusThreads = renderedThreads.filter((thread) => {
-      const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
-      if (threadKey === activeRouteThreadKey) return true;
-      const section = getSidebarThreadSection({
-        thread,
-        status: threadStatusByKey.get(threadKey) ?? null,
-        foldOlder: false,
-        olderAfterDays,
-      });
-      return isSidebarFocusGroupedSection(section);
-    });
     return (
       <div ref={attachThreadListAutoAnimateRef} className="contents">
         {focusThreads.map(renderThread)}
@@ -1217,7 +1251,8 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
   return (
     <div
       ref={attachThreadListAutoAnimateRef}
-      className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-2"
+      className={`min-h-0 flex-1 overflow-y-auto overscroll-contain pb-2 ${scrollbarClassName}`}
+      onScroll={handleScroll}
     >
       {showEmptyThreadState ? (
         <div className="px-3 py-5 text-center text-xs text-muted-foreground/45">No threads yet</div>
@@ -1236,7 +1271,8 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
       {foldOlderThreads && olderThreads.length > 0 ? (
         <details
           className="group mx-2 mb-2 border-t border-border/60 pt-1"
-          open={olderThreads.length === renderedThreads.length}
+          open={olderThreadsOpen}
+          onToggle={(event) => setOlderThreadsOpen(event.currentTarget.open)}
         >
           <summary className="flex h-8 cursor-pointer list-none items-center gap-1.5 px-1 text-[10px] text-muted-foreground/45 transition-colors hover:text-muted-foreground">
             <ChevronRightIcon className="size-3 transition-transform group-open:rotate-90" />
@@ -1951,8 +1987,12 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       suppressProjectClickForContextMenuRef.current = false;
       return;
     }
+    if (suppressProjectClickAfterDragRef.current) {
+      suppressProjectClickAfterDragRef.current = false;
+      return;
+    }
     onRailSelect?.();
-  }, [onRailSelect, suppressProjectClickForContextMenuRef]);
+  }, [onRailSelect, suppressProjectClickAfterDragRef, suppressProjectClickForContextMenuRef]);
 
   const navigateToThread = useCallback(
     (threadRef: ScopedThreadRef) => {
@@ -3243,6 +3283,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
     focusCount,
     focusSectionCounts,
   } = props;
+  const { handleScroll, scrollbarClassName } = useAutoHideScrollbar();
 
   const handleProjectSortOrderChange = useCallback(
     (sortOrder: SidebarProjectSortOrder) => {
@@ -3278,8 +3319,21 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
     () => activeRouteProjectKey ?? "focus",
   );
   useEffect(() => {
-    if (activeRouteProjectKey) setNavigatorSelection(activeRouteProjectKey);
+    if (activeRouteProjectKey) {
+      setNavigatorSelection((currentSelection) =>
+        currentSelection === "focus" ? currentSelection : activeRouteProjectKey,
+      );
+    }
   }, [activeRouteProjectKey]);
+  useEffect(() => {
+    if (
+      !activeRouteProjectKey &&
+      navigatorSelection !== "focus" &&
+      !sortedProjects.some((project) => project.projectKey === navigatorSelection)
+    ) {
+      setNavigatorSelection("focus");
+    }
+  }, [activeRouteProjectKey, navigatorSelection, sortedProjects]);
   const selectedProject = sortedProjects.find(
     (project) => project.projectKey === navigatorSelection,
   );
@@ -3425,7 +3479,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
             ) : null}
           </button>
           <div className="my-2 h-px w-6 bg-border/70" />
-          <div className="min-h-0 w-[calc(100%+1rem)] flex-1 self-start space-y-1 overflow-y-auto overflow-x-hidden overscroll-contain pb-1 pr-4 pt-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="min-h-0 w-[calc(100%+1rem)] flex-1 self-start space-y-1 overflow-y-auto overflow-x-hidden overscroll-contain pb-1 pr-4 pt-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <DndContext
               sensors={projectDnDSensors}
               collisionDetection={projectCollisionDetection}
@@ -3472,7 +3526,10 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
                   </span>
                 </button>
               </div>
-              <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain pb-2 pt-1">
+              <div
+                className={`flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain pb-2 pt-1 ${scrollbarClassName}`}
+                onScroll={handleScroll}
+              >
                 {(
                   Object.entries({
                     needs: "Action required",
@@ -3678,15 +3735,16 @@ export default function Sidebar() {
   const projectStatusByKey = useMemo(() => {
     const statuses = new Map<string, SidebarProjectRailStatus>();
     for (const [projectKey, threads] of threadsByProjectKey) {
+      const activeThreads = threads.filter((thread) => thread.archivedAt === null);
       if (
-        threads.some(
+        activeThreads.some(
           (thread) => thread.session?.status === "error" || thread.latestTurn?.state === "error",
         )
       ) {
         statuses.set(projectKey, "failed");
         continue;
       }
-      const threadStatuses = threads.map((thread) =>
+      const threadStatuses = activeThreads.map((thread) =>
         resolveThreadStatusPill({
           thread: {
             ...thread,

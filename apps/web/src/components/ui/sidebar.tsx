@@ -25,7 +25,7 @@ import * as Schema from "effect/Schema";
 const SIDEBAR_COOKIE_NAME = "sidebar_state";
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
 const SIDEBAR_WIDTH = "16rem";
-const SIDEBAR_WIDTH_MOBILE = "20rem";
+const SIDEBAR_WIDTH_MOBILE = "min(20rem, 100vw)";
 const SIDEBAR_WIDTH_ICON = "3rem";
 const SIDEBAR_RESIZE_DEFAULT_MIN_WIDTH = 16 * 16;
 
@@ -391,16 +391,16 @@ function SidebarRail({
       resizeState.transitionTargets.forEach((element) => {
         element.style.removeProperty("transition-duration");
       });
-      if (resolvedResizable?.storageKey && typeof window !== "undefined") {
-        setLocalStorageItem(resolvedResizable.storageKey, resizeState.width, Schema.Finite);
-      }
-      resolvedResizable?.onResize?.(resizeState.width);
       resizeStateRef.current = null;
       if (resizeState.rail.hasPointerCapture(pointerId)) {
         resizeState.rail.releasePointerCapture(pointerId);
       }
       document.body.style.removeProperty("cursor");
       document.body.style.removeProperty("user-select");
+      resolvedResizable?.onResize?.(resizeState.width);
+      if (resolvedResizable?.storageKey && typeof window !== "undefined") {
+        setLocalStorageItem(resolvedResizable.storageKey, resizeState.width, Schema.Finite);
+      }
     },
     [resolvedResizable],
   );
