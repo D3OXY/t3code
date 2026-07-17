@@ -21,6 +21,21 @@ export const SidebarThreadSortOrder = Schema.Literals(["updated_at", "created_at
 export type SidebarThreadSortOrder = typeof SidebarThreadSortOrder.Type;
 export const DEFAULT_SIDEBAR_THREAD_SORT_ORDER: SidebarThreadSortOrder = "updated_at";
 
+export const SidebarThreadLayout = Schema.Literals(["grouped", "ungrouped"]);
+export type SidebarThreadLayout = typeof SidebarThreadLayout.Type;
+export const DEFAULT_SIDEBAR_THREAD_LAYOUT: SidebarThreadLayout = "grouped";
+
+export const MIN_SIDEBAR_OLDER_AFTER_DAYS = 1;
+export const MAX_SIDEBAR_OLDER_AFTER_DAYS = 30;
+export const SidebarOlderAfterDays = Schema.Int.check(
+  Schema.isBetween({
+    minimum: MIN_SIDEBAR_OLDER_AFTER_DAYS,
+    maximum: MAX_SIDEBAR_OLDER_AFTER_DAYS,
+  }),
+);
+export type SidebarOlderAfterDays = typeof SidebarOlderAfterDays.Type;
+export const DEFAULT_SIDEBAR_OLDER_AFTER_DAYS: SidebarOlderAfterDays = 3;
+
 export const SidebarProjectGroupingMode = Schema.Literals([
   "repository",
   "repository_path",
@@ -84,6 +99,13 @@ export const ClientSettingsSchema = Schema.Struct({
   ),
   sidebarThreadSortOrder: SidebarThreadSortOrder.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_THREAD_SORT_ORDER)),
+  ),
+  sidebarThreadLayout: SidebarThreadLayout.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_THREAD_LAYOUT)),
+  ),
+  sidebarFoldOlderThreads: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  sidebarOlderAfterDays: SidebarOlderAfterDays.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_OLDER_AFTER_DAYS)),
   ),
   sidebarThreadPreviewCount: SidebarThreadPreviewCount.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_THREAD_PREVIEW_COUNT)),
@@ -565,6 +587,9 @@ export const ClientSettingsPatch = Schema.Struct({
   ),
   sidebarProjectSortOrder: Schema.optionalKey(SidebarProjectSortOrder),
   sidebarThreadSortOrder: Schema.optionalKey(SidebarThreadSortOrder),
+  sidebarThreadLayout: Schema.optionalKey(SidebarThreadLayout),
+  sidebarFoldOlderThreads: Schema.optionalKey(Schema.Boolean),
+  sidebarOlderAfterDays: Schema.optionalKey(SidebarOlderAfterDays),
   sidebarThreadPreviewCount: Schema.optionalKey(SidebarThreadPreviewCount),
   timestampFormat: Schema.optionalKey(TimestampFormat),
   wordWrap: Schema.optionalKey(Schema.Boolean),

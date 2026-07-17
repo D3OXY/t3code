@@ -13,6 +13,7 @@ import { BetterSidebarPrototype } from "./sidebar/BetterSidebarPrototype";
 import { useLocation } from "@tanstack/react-router";
 
 const THREAD_SIDEBAR_WIDTH_STORAGE_KEY = "chat_thread_sidebar_width";
+const THREAD_SIDEBAR_DEFAULT_WIDTH = 20 * 16;
 const THREAD_SIDEBAR_MIN_WIDTH = 13 * 16;
 const THREAD_MAIN_CONTENT_MIN_WIDTH = 40 * 16;
 const MACOS_TRAFFIC_LIGHTS_LEFT_INSET = "90px";
@@ -72,6 +73,10 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
     isMacosDesktop && !isWindowFullscreen
       ? ({ "--workspace-controls-left": MACOS_TRAFFIC_LIGHTS_LEFT_INSET } as CSSProperties)
       : undefined;
+  const sidebarProviderStyle = {
+    ...macosWindowControlsStyle,
+    "--sidebar-width": `${THREAD_SIDEBAR_DEFAULT_WIDTH}px`,
+  } as CSSProperties;
 
   useEffect(() => {
     if (!isMacosDesktop) return;
@@ -108,7 +113,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   }, [navigate]);
 
   return (
-    <SidebarProvider className="h-dvh! min-h-0!" defaultOpen style={macosWindowControlsStyle}>
+    <SidebarProvider className="h-dvh! min-h-0!" defaultOpen style={sidebarProviderStyle}>
       <Sidebar
         side="left"
         collapsible="offcanvas"

@@ -45,7 +45,10 @@ import {
   type ReactNode,
 } from "react";
 import { useAtomValue } from "@effect/atom-react";
-import { OpenAddProjectCommandPaletteProvider } from "../commandPaletteContext";
+import {
+  OpenAddProjectCommandPaletteProvider,
+  type NewThreadProjectSelectionHandler,
+} from "../commandPaletteContext";
 import { isDesktopLocalConnectionTarget } from "../connection/desktopLocal";
 import { useDesktopLocalBootstraps } from "../connection/useDesktopLocalBootstraps";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
@@ -127,6 +130,7 @@ import { stackedThreadToast, toastManager } from "./ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { ComposerHandleContext, useComposerHandleContext } from "../composerHandleContext";
 import type { ChatComposerHandle } from "./chat/ChatComposer";
+import type { SidebarProjectGroupMember, SidebarProjectSnapshot } from "../sidebarProjectGrouping";
 
 const EMPTY_BROWSE_ENTRIES: FilesystemBrowseResult["entries"] = [];
 
@@ -334,9 +338,13 @@ function errorMessage(error: unknown): string {
   return "An error occurred.";
 }
 
-interface CommandPaletteOpenIntent {
-  readonly kind: "add-project";
-}
+type CommandPaletteOpenIntent =
+  | { readonly kind: "add-project" }
+  | {
+      readonly kind: "new-thread-project";
+      readonly projects: readonly SidebarProjectSnapshot[];
+      readonly onSelectProject?: NewThreadProjectSelectionHandler;
+    };
 
 interface CommandPaletteUiState {
   readonly open: boolean;
@@ -347,6 +355,11 @@ type CommandPaletteUiAction =
   | { readonly _tag: "SetOpen"; readonly open: boolean }
   | { readonly _tag: "Toggle" }
   | { readonly _tag: "OpenAddProject" }
+  | {
+      readonly _tag: "OpenNewThreadProject";
+      readonly projects: readonly SidebarProjectSnapshot[];
+      readonly onSelectProject?: NewThreadProjectSelectionHandler;
+    }
   | { readonly _tag: "ClearOpenIntent" };
 
 function reduceCommandPaletteUiState(
@@ -363,6 +376,15 @@ function reduceCommandPaletteUiState(
       return { open: !state.open, openIntent: null };
     case "OpenAddProject":
       return { open: true, openIntent: { kind: "add-project" } };
+    case "OpenNewThreadProject":
+      return {
+        open: true,
+        openIntent: {
+          kind: "new-thread-project",
+          projects: action.projects,
+          ...(action.onSelectProject ? { onSelectProject: action.onSelectProject } : {}),
+        },
+      };
     case "ClearOpenIntent":
       return state.openIntent ? { ...state, openIntent: null } : state;
   }
@@ -376,6 +398,18 @@ export function CommandPalette({ children }: { children: ReactNode }) {
   const setOpen = useCallback((open: boolean) => dispatch({ _tag: "SetOpen", open }), []);
   const toggleOpen = useCallback(() => dispatch({ _tag: "Toggle" }), []);
   const openAddProject = useCallback(() => dispatch({ _tag: "OpenAddProject" }), []);
+  const openNewThreadProjectPicker = useCallback(
+    (
+      projects: readonly SidebarProjectSnapshot[],
+      onSelectProject?: NewThreadProjectSelectionHandler,
+    ) =>
+      dispatch({
+        _tag: "OpenNewThreadProject",
+        projects,
+        ...(onSelectProject ? { onSelectProject } : {}),
+      }),
+    [],
+  );
   const clearOpenIntent = useCallback(() => dispatch({ _tag: "ClearOpenIntent" }), []);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const composerHandleRef = useRef<ChatComposerHandle | null>(null);
@@ -411,7 +445,10 @@ export function CommandPalette({ children }: { children: ReactNode }) {
   }, [keybindings, terminalOpen, toggleOpen]);
 
   return (
-    <OpenAddProjectCommandPaletteProvider openAddProject={openAddProject}>
+    <OpenAddProjectCommandPaletteProvider
+      openAddProject={openAddProject}
+      openNewThreadProjectPicker={openNewThreadProjectPicker}
+    >
       <ComposerHandleContext value={composerHandleRef}>
         <CommandDialog open={state.open} onOpenChange={setOpen}>
           {children}
@@ -667,6 +704,21 @@ function OpenCommandPaletteDialog(props: {
     [openProjectFromSearch, projects],
   );
 
+  const startNewThreadInProject = useCallback(
+    async (project: { readonly environmentId: EnvironmentId; readonly id: ProjectId }) => {
+      await startNewThreadInProjectFromContext(
+        {
+          activeDraftThread,
+          activeThread: activeThread ?? undefined,
+          defaultProjectRef,
+          handleNewThread,
+        },
+        scopeProjectRef(project.environmentId, project.id),
+      );
+    },
+    [activeDraftThread, activeThread, defaultProjectRef, handleNewThread],
+  );
+
   const projectThreadItems = useMemo(
     () =>
       buildProjectActionItems({
@@ -680,20 +732,93 @@ function OpenCommandPaletteDialog(props: {
             className={ITEM_ICON_CLASS}
           />
         ),
-        runProject: async (project) => {
-          await startNewThreadInProjectFromContext(
-            {
-              activeDraftThread,
-              activeThread: activeThread ?? undefined,
-              defaultProjectRef,
-              handleNewThread,
-            },
-            scopeProjectRef(project.environmentId, project.id),
-          );
-        },
+        runProject: startNewThreadInProject,
       }),
-    [activeDraftThread, activeThread, defaultProjectRef, handleNewThread, projects],
+    [projects, startNewThreadInProject],
   );
+
+  const newThreadProjectPickerGroups = useMemo<CommandPaletteView["groups"]>(() => {
+    if (openIntent?.kind !== "new-thread-project") return [];
+
+    const memberItem = (member: SidebarProjectGroupMember): CommandPaletteActionItem => ({
+      kind: "action",
+      value: `focus-new-thread:${member.physicalProjectKey}`,
+      searchTerms: [
+        member.title,
+        member.workspaceRoot,
+        member.environmentLabel ?? "",
+        member.environmentId,
+      ],
+      title: member.title,
+      description: `${member.environmentLabel ?? member.environmentId} · ${member.workspaceRoot}`,
+      icon: (
+        <ProjectFavicon
+          environmentId={member.environmentId}
+          cwd={member.workspaceRoot}
+          className={ITEM_ICON_CLASS}
+        />
+      ),
+      run: async () => {
+        if (openIntent.onSelectProject) {
+          await openIntent.onSelectProject(member);
+          return;
+        }
+        await startNewThreadInProject(member);
+      },
+    });
+
+    return [
+      {
+        value: "focus-new-thread-projects",
+        label: "Projects",
+        items: openIntent.projects.map(
+          (project): CommandPaletteActionItem | CommandPaletteSubmenuItem => {
+            const members = project.memberProjects.map(memberItem);
+            const shared = {
+              value: `focus-new-thread-group:${project.projectKey}`,
+              searchTerms: [
+                project.displayName,
+                ...project.memberProjects.flatMap((member) => [
+                  member.title,
+                  member.workspaceRoot,
+                  member.environmentLabel ?? "",
+                ]),
+              ],
+              title: project.displayName,
+              description:
+                members.length > 1
+                  ? `${members.length} projects`
+                  : (project.memberProjects[0]?.workspaceRoot ?? project.workspaceRoot),
+              icon: (
+                <ProjectFavicon
+                  environmentId={project.environmentId}
+                  cwd={project.workspaceRoot}
+                  className={ITEM_ICON_CLASS}
+                />
+              ),
+            };
+
+            if (members.length === 1 && members[0]) {
+              return { ...shared, kind: "action", run: members[0].run };
+            }
+
+            return {
+              ...shared,
+              kind: "submenu",
+              addonIcon: <SquarePenIcon className={ADDON_ICON_CLASS} />,
+              groups: [
+                {
+                  value: `members:${project.projectKey}`,
+                  label: "Choose project",
+                  items: members,
+                },
+              ],
+            };
+          },
+        ),
+      },
+    ];
+  }, [openIntent, startNewThreadInProject]);
 
   const allThreadItems = useMemo(
     () =>
@@ -959,6 +1084,20 @@ function OpenCommandPaletteDialog(props: {
     clearOpenIntent();
     openAddProjectFlow();
   }, [clearOpenIntent, openAddProjectFlow, openIntent]);
+
+  useLayoutEffect(() => {
+    if (openIntent?.kind !== "new-thread-project") return;
+    clearOpenIntent();
+    const onlyItem = newThreadProjectPickerGroups[0]?.items[0];
+    if (newThreadProjectPickerGroups[0]?.items.length === 1 && onlyItem?.kind === "submenu") {
+      pushView(onlyItem);
+      return;
+    }
+    pushPaletteView({
+      addonIcon: <SquarePenIcon className={ADDON_ICON_CLASS} />,
+      groups: newThreadProjectPickerGroups,
+    });
+  }, [clearOpenIntent, newThreadProjectPickerGroups, openIntent]);
 
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
 
