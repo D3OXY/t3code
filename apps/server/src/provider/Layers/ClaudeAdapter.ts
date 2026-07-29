@@ -201,6 +201,7 @@ interface ClaudeSessionContext {
   lastKnownTotalProcessedTokens: number | undefined;
   lastAssistantUuid: string | undefined;
   lastThreadStartedId: string | undefined;
+  interruptRequestedTurnId: TurnId | undefined;
   stopped: boolean;
 }
 
@@ -303,18 +304,31 @@ function resultErrorsText(result: SDKResultMessage): string {
     : "";
 }
 
-function isInterruptedResult(result: SDKResultMessage): boolean {
+function isClaudeExecutionDiagnosticOnlyResult(result: SDKResultMessage): boolean {
+  return (
+    result.subtype === "error_during_execution" &&
+    "errors" in result &&
+    result.errors.length === 1 &&
+    result.errors[0]?.startsWith("[ede_diagnostic]") === true
+  );
+}
+
+function isInterruptedResult(
+  result: SDKResultMessage,
+  explicitInterruptRequested = false,
+): boolean {
   const errors = resultErrorsText(result);
   if (errors.includes("interrupt")) {
     return true;
   }
 
   return (
-    result.subtype === "error_during_execution" &&
-    result.is_error === false &&
-    (errors.includes("request was aborted") ||
-      errors.includes("interrupted by user") ||
-      errors.includes("aborted"))
+    (result.subtype === "error_during_execution" &&
+      result.is_error === false &&
+      (errors.includes("request was aborted") ||
+        errors.includes("interrupted by user") ||
+        errors.includes("aborted"))) ||
+    (explicitInterruptRequested && isClaudeExecutionDiagnosticOnlyResult(result))
   );
 }
 
@@ -994,13 +1008,16 @@ const buildUserMessageEffect = Effect.fn("buildUserMessageEffect")(function* (
   return buildUserMessage({ sdkContent });
 });
 
-function turnStatusFromResult(result: SDKResultMessage): ProviderRuntimeTurnStatus {
+function turnStatusFromResult(
+  result: SDKResultMessage,
+  explicitInterruptRequested = false,
+): ProviderRuntimeTurnStatus {
   if (result.subtype === "success") {
     return "completed";
   }
 
   const errors = resultErrorsText(result);
-  if (isInterruptedResult(result)) {
+  if (isInterruptedResult(result, explicitInterruptRequested)) {
     return "interrupted";
   }
   if (errors.includes("cancel")) {
@@ -2553,7 +2570,11 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       return;
     }
 
-    const status = turnStatusFromResult(message);
+    const explicitInterruptRequested =
+      context.interruptRequestedTurnId !== undefined &&
+      context.interruptRequestedTurnId === context.turnState?.turnId;
+    context.interruptRequestedTurnId = undefined;
+    const status = turnStatusFromResult(message, explicitInterruptRequested);
     const errorMessage = message.subtype === "success" ? undefined : message.errors[0];
 
     if (status === "failed") {
@@ -3640,6 +3661,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         lastKnownTotalProcessedTokens: undefined,
         lastAssistantUuid: resumeState?.resumeSessionAt,
         lastThreadStartedId: undefined,
+        interruptRequestedTurnId: undefined,
         stopped: false,
       };
       yield* Ref.set(contextRef, context);
@@ -3825,10 +3847,20 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
   const interruptTurn: ClaudeAdapterShape["interruptTurn"] = Effect.fn("interruptTurn")(
     function* (threadId, _turnId) {
       const context = yield* requireSession(threadId);
+      const interruptRequestedTurnId = context.turnState?.turnId;
+      context.interruptRequestedTurnId = interruptRequestedTurnId;
       yield* Effect.tryPromise({
         try: () => context.query.interrupt(),
         catch: (cause) => toRequestError(threadId, "turn/interrupt", cause),
-      });
+      }).pipe(
+        Effect.tapError(() =>
+          Effect.sync(() => {
+            if (context.interruptRequestedTurnId === interruptRequestedTurnId) {
+              context.interruptRequestedTurnId = undefined;
+            }
+          }),
+        ),
+      );
     },
   );
 
