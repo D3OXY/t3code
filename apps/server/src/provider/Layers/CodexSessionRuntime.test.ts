@@ -830,15 +830,16 @@ describe("isRecoverableThreadResumeError", () => {
 describe("openCodexThread", () => {
   it.effect("resumes a thread whose history uses a newer protocol variant", () =>
     Effect.gen(function* () {
-      // Codex CLI 0.150.0 grew a fourth subAgentActivity kind. Opening the
-      // session must not depend on history this build cannot name (#8322).
+      // Opening a session must not depend on history this build cannot name
+      // (#8322). The kind is deliberately fictional so the test keeps
+      // exercising drift after the bindings learn today's values.
       const resumed = makeThreadOpenResponse("resumed-thread", [
         {
           id: "item-18",
           type: "subAgentActivity",
           agentPath: "/root/child",
           agentThreadId: "child-thread",
-          kind: "completed",
+          kind: "escalated",
         },
       ]);
       const calls: Array<string> = [];

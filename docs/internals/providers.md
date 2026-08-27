@@ -100,9 +100,14 @@ Two rules keep that drift from breaking sessions:
   so the thread falls back to a fresh Codex session instead of becoming permanently unopenable.
   Notifications we cannot decode are dropped with a warning, never silently.
 
-Regenerating is not a substitute for either rule: because upstream also adds _required_ fields,
-pinning forward can break users still on an older CLI. Bindings track the protocol; the rules above
-absorb the gap between releases.
+When a live event carries a value the bindings reject, teach them that one value: the generator's
+definition overrides (`Codex0150DefinitionSchemas` in `scripts/generate.ts`) widen a named
+definition without moving the pin. Prefer that to a full refresh, which drags in unrelated changes
+and can break older CLIs — upstream adds _required_ fields too, so pinning forward breaks anyone
+who has not upgraded.
+
+None of that replaces the two rules. Overrides fix the variants we already know about; the rules
+are what keep the ones we do not know about yet from being fatal.
 
 ## Model manifest
 

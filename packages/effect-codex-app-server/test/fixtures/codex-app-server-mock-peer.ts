@@ -98,8 +98,10 @@ const handleMethod = (message: Record<string, unknown>) => {
       return;
     }
     // Replays a resume payload whose history carries a subAgentActivity kind
-    // newer than the generated bindings, the shape that made resuming a thread
-    // fail outright before responses could be decoded narrowly.
+    // the generated bindings do not name, the shape that made resuming a
+    // thread fail outright before responses could be decoded narrowly. The
+    // value is deliberately fictional: naming a real one would stop testing
+    // drift as soon as the bindings caught up with it.
     case "thread/resume": {
       respond(message.id as number | string, {
         cwd: process.cwd(),
@@ -130,7 +132,7 @@ const handleMethod = (message: Record<string, unknown>) => {
                   type: "subAgentActivity",
                   agentPath: "/root/child",
                   agentThreadId: "child-thread",
-                  kind: "completed",
+                  kind: "escalated",
                 },
               ],
             },
