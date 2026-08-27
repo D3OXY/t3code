@@ -667,7 +667,16 @@ function classifyCodexStderrLine(rawLine: string): { readonly message: string } 
   return { message: line };
 }
 
+const isCodexAppServerRequestError = Schema.is(CodexErrors.CodexAppServerRequestError);
+
 export function isRecoverableThreadResumeError(error: unknown): boolean {
+  // A response we cannot decode means Codex resumed the thread but described it
+  // in a protocol shape this build does not know. Retrying will never help, so
+  // treat it as recoverable and open a fresh Codex thread instead of leaving
+  // the T3 thread permanently unusable.
+  if (isCodexAppServerRequestError(error) && error.operation === "decode-payload") {
+    return true;
+  }
   const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
   if (!message.includes("thread")) {
     return false;
@@ -675,9 +684,21 @@ export function isRecoverableThreadResumeError(error: unknown): boolean {
   return RECOVERABLE_THREAD_RESUME_ERROR_SNIPPETS.some((snippet) => message.includes(snippet));
 }
 
-type CodexThreadOpenResponse =
-  | CodexRpc.ClientRequestResponsesByMethod["thread/start"]
-  | CodexRpc.ClientRequestResponsesByMethod["thread/resume"];
+/**
+ * The only parts of a `thread/start` or `thread/resume` response this runtime
+ * consumes. Codex replays the whole thread history in those responses, and
+ * decoding it against generated bindings makes opening a session fail whenever
+ * upstream adds a protocol variant we have not regenerated yet (see #8322).
+ * Session state is rebuilt from notifications anyway, so read the handful of
+ * fields we need and let the rest pass through undecoded.
+ */
+const CodexThreadOpenResponse = Schema.Struct({
+  thread: Schema.Struct({ id: Schema.String }),
+  cwd: Schema.optional(Schema.String),
+  model: Schema.optional(Schema.String),
+});
+
+type CodexThreadOpenResponse = typeof CodexThreadOpenResponse.Type;
 
 type CodexThreadOpenMethod = "thread/start" | "thread/resume";
 
@@ -685,7 +706,8 @@ interface CodexThreadOpenClient {
   readonly request: <M extends CodexThreadOpenMethod>(
     method: M,
     payload: CodexRpc.ClientRequestParamsByMethod[M],
-  ) => Effect.Effect<CodexRpc.ClientRequestResponsesByMethod[M], CodexErrors.CodexAppServerError>;
+    responseSchema: typeof CodexThreadOpenResponse,
+  ) => Effect.Effect<CodexThreadOpenResponse, CodexErrors.CodexAppServerError>;
 }
 
 export const openCodexThread = (input: {
@@ -706,14 +728,18 @@ export const openCodexThread = (input: {
   });
 
   if (resumeThreadId === undefined) {
-    return input.client.request("thread/start", startParams);
+    return input.client.request("thread/start", startParams, CodexThreadOpenResponse);
   }
 
   return input.client
-    .request("thread/resume", {
-      threadId: resumeThreadId,
-      ...startParams,
-    })
+    .request(
+      "thread/resume",
+      {
+        threadId: resumeThreadId,
+        ...startParams,
+      },
+      CodexThreadOpenResponse,
+    )
     .pipe(
       Effect.catchIf(isRecoverableThreadResumeError, (error) =>
         Effect.logWarning("codex app-server thread resume fell back to fresh start", {
@@ -722,7 +748,11 @@ export const openCodexThread = (input: {
           resumeThreadId,
           recoverable: true,
           cause: error,
-        }).pipe(Effect.andThen(input.client.request("thread/start", startParams))),
+        }).pipe(
+          Effect.andThen(
+            input.client.request("thread/start", startParams, CodexThreadOpenResponse),
+          ),
+        ),
       ),
     );
 };
@@ -2249,8 +2279,8 @@ export const makeCodexSessionRuntime = (
       const session = {
         ...(yield* Ref.get(sessionRef)),
         status: "ready",
-        cwd: opened.cwd,
-        model: opened.model,
+        cwd: opened.cwd ?? options.cwd,
+        model: opened.model ?? requestedModel,
         resumeCursor: { threadId: providerThreadId },
         updatedAt: yield* nowIso,
       } satisfies ProviderSession;

@@ -9,7 +9,12 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 
+import * as Schema from "effect/Schema";
+
 import * as CodexClient from "./client.ts";
+import * as CodexErrors from "./errors.ts";
+
+const isRequestError = Schema.is(CodexErrors.CodexAppServerRequestError);
 
 const mockPeerPath = Effect.map(Effect.service(Path.Path), (path) =>
   path.join(import.meta.dirname, "../test/fixtures/codex-app-server-mock-peer.ts"),
@@ -123,6 +128,38 @@ it.layer(NodeServices.layer)("effect-codex-app-server client", (it) => {
       ]);
     }),
   );
+  it.effect("decodes a response with the caller's schema instead of the generated one", () =>
+    Effect.gen(function* () {
+      const handle = yield* makeHandle();
+      const scope = yield* Scope.make();
+      const clientLayer = CodexClient.layerChildProcess(handle);
+      const context = yield* Layer.buildWithScope(clientLayer, scope);
+
+      const result = yield* Effect.gen(function* () {
+        const client = yield* CodexClient.CodexAppServerClient;
+        const params = { threadId: "resumed-thread" };
+
+        const generated = yield* client.request("thread/resume", params).pipe(Effect.flip);
+        const narrow = yield* client.request(
+          "thread/resume",
+          params,
+          Schema.Struct({ thread: Schema.Struct({ id: Schema.String }) }),
+        );
+
+        return { generated, narrow };
+      }).pipe(Effect.provide(context), Effect.ensuring(Scope.close(scope, Exit.void)));
+
+      // The generated bindings reject history they do not recognize...
+      assert.equal(isRequestError(result.generated), true);
+      assert.equal(
+        isRequestError(result.generated) ? result.generated.operation : undefined,
+        "decode-payload",
+      );
+      // ...while a caller that reads only what it uses is unaffected.
+      assert.equal(result.narrow.thread.id, "resumed-thread");
+    }),
+  );
+
   it.effect("drains child stderr so large diagnostics cannot block protocol responses", () =>
     Effect.gen(function* () {
       const handle = yield* makeHandle({

@@ -81,6 +81,48 @@ const handleMethod = (message: Record<string, unknown>) => {
       });
       return;
     }
+    // Replays a resume payload whose history carries a subAgentActivity kind
+    // newer than the generated bindings, the shape that made resuming a thread
+    // fail outright before responses could be decoded narrowly.
+    case "thread/resume": {
+      respond(message.id as number | string, {
+        cwd: process.cwd(),
+        model: "gpt-5.3-codex",
+        modelProvider: "openai",
+        approvalPolicy: "never",
+        approvalsReviewer: "user",
+        sandbox: { type: "dangerFullAccess" },
+        thread: {
+          id: "resumed-thread",
+          cliVersion: "0.150.0",
+          createdAt: 0,
+          updatedAt: 0,
+          cwd: process.cwd(),
+          ephemeral: false,
+          modelProvider: "openai",
+          preview: "",
+          sessionId: "session-1",
+          source: "cli",
+          status: { type: "idle" },
+          turns: [
+            {
+              id: "turn-1",
+              status: "completed",
+              items: [
+                {
+                  id: "item-18",
+                  type: "subAgentActivity",
+                  agentPath: "/root/child",
+                  agentThreadId: "child-thread",
+                  kind: "completed",
+                },
+              ],
+            },
+          ],
+        },
+      });
+      return;
+    }
     case "skills/list": {
       pendingSkillsListRequestId = message.id as number | string;
       pendingUserInputRequestId = sendRequest("item/tool/requestUserInput", {

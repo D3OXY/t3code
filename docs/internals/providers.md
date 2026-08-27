@@ -83,6 +83,27 @@ empty inventory is authoritative. Existing threads keep their explicit model ide
 options when catalog metadata is missing; the catalog is not permission to choose a different
 model for a thread.
 
+## Generated Codex bindings
+
+`packages/effect-codex-app-server` holds Effect/Schema bindings generated from a pinned
+`openai/codex` revision (`scripts/generate.ts`). Codex ships far more often than we regenerate, so
+at any moment an installed CLI may describe itself with protocol variants those bindings do not
+name — a new enum member, a new item type, a newly required field.
+
+Two rules keep that drift from breaking sessions:
+
+- **Decode only what you consume.** `thread/start` and `thread/resume` replay an entire thread
+  history, and the session runtime needs three fields from it. Pass a narrow response schema as the
+  third argument to `client.request` rather than accepting the generated one; anything the runtime
+  does not read cannot then fail the request.
+- **Never treat drift as fatal.** A response we cannot decode counts as a recoverable resume error,
+  so the thread falls back to a fresh Codex session instead of becoming permanently unopenable.
+  Notifications we cannot decode are dropped with a warning, never silently.
+
+Regenerating is not a substitute for either rule: because upstream also adds _required_ fields,
+pinning forward can break users still on an older CLI. Bindings track the protocol; the rules above
+absorb the gap between releases.
+
 ## Model manifest
 
 The model picker's legacy section is driven by `apps/server/src/provider/model-manifest.json`, which

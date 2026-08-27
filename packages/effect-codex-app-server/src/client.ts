@@ -39,10 +39,24 @@ export class CodexAppServerClient extends Context.Service<
   CodexAppServerClient,
   {
     readonly raw: CodexAppServerClientRaw;
-    readonly request: <M extends CodexRpc.ClientRequestMethod>(
-      method: M,
-      payload: CodexRpc.ClientRequestParamsByMethod[M],
-    ) => Effect.Effect<CodexRpc.ClientRequestResponsesByMethod[M], CodexError.CodexAppServerError>;
+    /**
+     * Sends a client request. Params are always encoded with the generated
+     * schema; the response is decoded with the generated schema unless a
+     * narrower `responseSchema` is supplied. Pass one when the caller only
+     * consumes part of a large payload, so an unrecognized protocol variant
+     * elsewhere in that payload cannot fail the request.
+     */
+    readonly request: {
+      <M extends CodexRpc.ClientRequestMethod>(
+        method: M,
+        payload: CodexRpc.ClientRequestParamsByMethod[M],
+      ): Effect.Effect<CodexRpc.ClientRequestResponsesByMethod[M], CodexError.CodexAppServerError>;
+      <M extends CodexRpc.ClientRequestMethod, A, I>(
+        method: M,
+        payload: CodexRpc.ClientRequestParamsByMethod[M],
+        responseSchema: Schema.Codec<A, I>,
+      ): Effect.Effect<A, CodexError.CodexAppServerError>;
+    };
     readonly notify: <M extends CodexRpc.ClientNotificationMethod>(
       method: M,
       payload: CodexRpc.ClientNotificationParamsByMethod[M],
@@ -150,6 +164,15 @@ export const make = Effect.fn("effect-codex-app-server/CodexAppServerClient.make
 
     if (schema) {
       return decodeNotificationPayload(notification.method, schema, notification.params).pipe(
+        // A notification we cannot decode is dropped rather than failing the
+        // session, but it is still protocol drift we want to hear about:
+        // discarding it silently hides the loss of a real lifecycle event.
+        Effect.tapError((error) =>
+          Effect.logWarning("codex app-server notification dropped", {
+            method: notification.method,
+            cause: error,
+          }),
+        ),
         Effect.flatMap((decoded) =>
           Effect.forEach(handlers, (handler) => handler(decoded), { discard: true }),
         ),
@@ -194,19 +217,20 @@ export const make = Effect.fn("effect-codex-app-server/CodexAppServerClient.make
     onRequest: dispatchRequest,
   });
 
-  const request = <M extends CodexRpc.ClientRequestMethod>(
+  const request = <M extends CodexRpc.ClientRequestMethod, A, I>(
     method: M,
     payload: CodexRpc.ClientRequestParamsByMethod[M],
-  ): Effect.Effect<CodexRpc.ClientRequestResponsesByMethod[M], CodexError.CodexAppServerError> =>
+    responseSchema?: Schema.Codec<A, I>,
+  ): Effect.Effect<A, CodexError.CodexAppServerError> =>
     encodeOptionalPayload(method, getClientRequestParamSchema(method), payload).pipe(
       Effect.flatMap((encoded) => transport.request(method, encoded)),
       Effect.flatMap(
-        (
-          raw,
-        ): Effect.Effect<
-          CodexRpc.ClientRequestResponsesByMethod[M],
-          CodexError.CodexAppServerError
-        > => decodeOptionalPayload(method, getClientRequestResponseSchema(method), raw),
+        (raw): Effect.Effect<A, CodexError.CodexAppServerError> =>
+          decodeOptionalPayload(
+            method,
+            responseSchema ?? (getClientRequestResponseSchema(method) as never),
+            raw,
+          ),
       ),
     );
 
@@ -227,7 +251,7 @@ export const make = Effect.fn("effect-codex-app-server/CodexAppServerClient.make
       respond: transport.respond,
       respondError: transport.respondError,
     },
-    request,
+    request: request as CodexAppServerClient["Service"]["request"],
     notify,
     handleServerRequest: (method, handler) =>
       Effect.sync(() => {

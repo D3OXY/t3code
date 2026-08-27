@@ -6,7 +6,6 @@ import * as Schema from "effect/Schema";
 import { describe } from "vite-plus/test";
 import { DEFAULT_MODEL, ThreadId } from "@t3tools/contracts";
 import * as CodexErrors from "effect-codex-app-server/errors";
-import * as CodexRpc from "effect-codex-app-server/rpc";
 import * as EffectCodexSchema from "effect-codex-app-server/schema";
 
 import {
@@ -43,9 +42,12 @@ describe("CodexSessionRuntimeIdentifierGenerationError", () => {
   });
 });
 
-function makeThreadOpenResponse(
-  threadId: string,
-): CodexRpc.ClientRequestResponsesByMethod["thread/start"] {
+/**
+ * Raw `thread/start` / `thread/resume` payload as Codex puts it on the wire.
+ * `items` accepts arbitrary history entries so tests can replay shapes newer
+ * than the generated bindings.
+ */
+function makeThreadOpenResponse(threadId: string, items: ReadonlyArray<unknown> = []): unknown {
   return {
     cwd: "/tmp/project",
     model: "gpt-5.3-codex",
@@ -57,13 +59,48 @@ function makeThreadOpenResponse(
       id: threadId,
       createdAt: "2026-04-18T00:00:00.000Z",
       source: { session: "cli" },
-      turns: [],
+      turns: items.length === 0 ? [] : [{ id: "turn-1", status: "completed", items }],
       status: {
         state: "idle",
         activeFlags: [],
       },
     },
-  } as unknown as CodexRpc.ClientRequestResponsesByMethod["thread/start"];
+  };
+}
+
+/**
+ * Mirrors the real client: params are ignored, and the raw payload is decoded
+ * with whichever response schema the caller supplied, surfacing failures the
+ * same way (`operation: "decode-payload"`).
+ */
+function makeThreadOpenClient(
+  respond: (
+    method: "thread/start" | "thread/resume",
+  ) => Effect.Effect<unknown, CodexErrors.CodexAppServerError>,
+) {
+  return {
+    request: <A, I>(
+      method: "thread/start" | "thread/resume",
+      _payload: unknown,
+      responseSchema: Schema.Codec<A, I>,
+    ) =>
+      respond(method).pipe(
+        Effect.flatMap((raw) =>
+          Schema.decodeUnknownEffect(responseSchema)(raw).pipe(
+            Effect.mapError(
+              (cause) =>
+                new CodexErrors.CodexAppServerRequestError({
+                  code: -32603,
+                  errorMessage: `Invalid payload for method '${method}' during 'decode-payload'`,
+                  method,
+                  operation: "decode-payload",
+                  cause,
+                }),
+            ),
+          ),
+        ),
+      ),
+  };
 }
 
 describe("buildTurnStartParams", () => {
@@ -752,6 +789,20 @@ describe("isRecoverableThreadResumeError", () => {
     );
   });
 
+  it("matches responses this build cannot decode", () => {
+    NodeAssert.equal(
+      isRecoverableThreadResumeError(
+        new CodexErrors.CodexAppServerRequestError({
+          code: -32603,
+          errorMessage: "Invalid payload for method 'thread/resume' during 'decode-payload'",
+          method: "thread/resume",
+          operation: "decode-payload",
+        }),
+      ),
+      true,
+    );
+  });
+
   it("ignores unrelated missing-resource errors that do not mention threads", () => {
     NodeAssert.equal(
       isRecoverableThreadResumeError(
@@ -775,27 +826,55 @@ describe("isRecoverableThreadResumeError", () => {
 });
 
 describe("openCodexThread", () => {
+  it.effect("resumes a thread whose history uses a newer protocol variant", () =>
+    Effect.gen(function* () {
+      // Codex CLI 0.150.0 grew a fourth subAgentActivity kind. Opening the
+      // session must not depend on history this build cannot name (#8322).
+      const resumed = makeThreadOpenResponse("resumed-thread", [
+        {
+          id: "item-18",
+          type: "subAgentActivity",
+          agentPath: "/root/child",
+          agentThreadId: "child-thread",
+          kind: "completed",
+        },
+      ]);
+      const calls: Array<string> = [];
+      const client = makeThreadOpenClient((method) => {
+        calls.push(method);
+        return Effect.succeed(resumed);
+      });
+
+      const opened = yield* openCodexThread({
+        client,
+        threadId: ThreadId.make("thread-1"),
+        runtimeMode: "full-access",
+        cwd: "/tmp/project",
+        requestedModel: "gpt-5.3-codex",
+        serviceTier: undefined,
+        resumeThreadId: "resumed-thread",
+      });
+
+      NodeAssert.equal(opened.thread.id, "resumed-thread");
+      NodeAssert.deepStrictEqual(calls, ["thread/resume"]);
+    }),
+  );
+
   it.effect("falls back to thread/start when resume fails recoverably", () =>
     Effect.gen(function* () {
-      const calls: Array<{ method: "thread/start" | "thread/resume"; payload: unknown }> = [];
-      const started = makeThreadOpenResponse("fresh-thread");
-      const client = {
-        request: <M extends "thread/start" | "thread/resume">(
-          method: M,
-          payload: CodexRpc.ClientRequestParamsByMethod[M],
-        ) => {
-          calls.push({ method, payload });
-          if (method === "thread/resume") {
-            return Effect.fail(
-              new CodexErrors.CodexAppServerRequestError({
-                code: -32603,
-                errorMessage: "thread not found",
-              }),
-            );
-          }
-          return Effect.succeed(started as CodexRpc.ClientRequestResponsesByMethod[M]);
-        },
-      };
+      const calls: Array<string> = [];
+      const client = makeThreadOpenClient((method) => {
+        calls.push(method);
+        if (method === "thread/resume") {
+          return Effect.fail(
+            new CodexErrors.CodexAppServerRequestError({
+              code: -32603,
+              errorMessage: "thread not found",
+            }),
+          );
+        }
+        return Effect.succeed(makeThreadOpenResponse("fresh-thread"));
+      });
 
       const opened = yield* openCodexThread({
         client,
@@ -808,33 +887,48 @@ describe("openCodexThread", () => {
       });
 
       NodeAssert.equal(opened.thread.id, "fresh-thread");
-      NodeAssert.deepStrictEqual(
-        calls.map((call) => call.method),
-        ["thread/resume", "thread/start"],
-      );
+      NodeAssert.deepStrictEqual(calls, ["thread/resume", "thread/start"]);
+    }),
+  );
+
+  it.effect("falls back to thread/start when the resume response cannot be decoded", () =>
+    Effect.gen(function* () {
+      const calls: Array<string> = [];
+      const client = makeThreadOpenClient((method) => {
+        calls.push(method);
+        if (method === "thread/resume") {
+          return Effect.succeed({ thread: {} });
+        }
+        return Effect.succeed(makeThreadOpenResponse("fresh-thread"));
+      });
+
+      const opened = yield* openCodexThread({
+        client,
+        threadId: ThreadId.make("thread-1"),
+        runtimeMode: "full-access",
+        cwd: "/tmp/project",
+        requestedModel: "gpt-5.3-codex",
+        serviceTier: undefined,
+        resumeThreadId: "stale-thread",
+      });
+
+      NodeAssert.equal(opened.thread.id, "fresh-thread");
+      NodeAssert.deepStrictEqual(calls, ["thread/resume", "thread/start"]);
     }),
   );
 
   it.effect("propagates non-recoverable resume failures", () =>
     Effect.gen(function* () {
-      const client = {
-        request: <M extends "thread/start" | "thread/resume">(
-          method: M,
-          _payload: CodexRpc.ClientRequestParamsByMethod[M],
-        ) => {
-          if (method === "thread/resume") {
-            return Effect.fail(
+      const client = makeThreadOpenClient((method) =>
+        method === "thread/resume"
+          ? Effect.fail(
               new CodexErrors.CodexAppServerRequestError({
                 code: -32603,
                 errorMessage: "timed out waiting for server",
               }),
-            );
-          }
-          return Effect.succeed(
-            makeThreadOpenResponse("fresh-thread") as CodexRpc.ClientRequestResponsesByMethod[M],
-          );
-        },
-      };
+            )
+          : Effect.succeed(makeThreadOpenResponse("fresh-thread")),
+      );
 
       const error = yield* openCodexThread({
         client,
