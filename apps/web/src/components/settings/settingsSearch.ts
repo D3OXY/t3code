@@ -132,6 +132,11 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/general",
   },
   {
+    id: "pull-request-links-in-app",
+    title: "Open pull request links in T3 Code",
+    to: "/settings/general",
+  },
+  {
     id: "skills-in-slash-menu",
     title: "Show skills in slash menu",
     to: "/settings/general",

@@ -88,12 +88,17 @@ describe("openPullRequestLink", () => {
 
 describe("shouldOpenPullRequestExternally", () => {
   it("uses the browser for command-click and control-click", () => {
-    expect(shouldOpenPullRequestExternally({ metaKey: true, ctrlKey: false })).toBe(true);
-    expect(shouldOpenPullRequestExternally({ metaKey: false, ctrlKey: true })).toBe(true);
+    expect(shouldOpenPullRequestExternally({ metaKey: true, ctrlKey: false }, true)).toBe(true);
+    expect(shouldOpenPullRequestExternally({ metaKey: false, ctrlKey: true }, true)).toBe(true);
   });
 
   it("keeps an unmodified click in the pull request view", () => {
-    expect(shouldOpenPullRequestExternally({ metaKey: false, ctrlKey: false })).toBe(false);
+    expect(shouldOpenPullRequestExternally({ metaKey: false, ctrlKey: false }, true)).toBe(false);
+  });
+
+  it("sends every click to the browser once the in-app preference is off", () => {
+    expect(shouldOpenPullRequestExternally({ metaKey: false, ctrlKey: false }, false)).toBe(true);
+    expect(shouldOpenPullRequestExternally({ metaKey: true, ctrlKey: false }, false)).toBe(true);
   });
 });
 

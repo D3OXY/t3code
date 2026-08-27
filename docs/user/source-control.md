@@ -43,6 +43,7 @@ T3 Code works with the platforms your team already uses:
   leaving the conversation
 - Open the review directly in your browser with one click
 - Command-click (Control-click on Windows and Linux) a pull request number in the sidebar to open it in your browser instead of in T3 Code
+- Prefer your browser for everything? Turn off **Settings → General → Open pull request links in T3 Code**, and every pull request link opens there instead
 - Check out a teammate's branch to review code locally
 
 **Fix what you wrote, in place**

@@ -11,6 +11,7 @@ import { type MouseEvent, useCallback } from "react";
 import { pullRequestHostOf, type SourceControlProviderKind } from "@t3tools/contracts";
 
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
+import { useClientSettings } from "../hooks/useSettings";
 import { readLocalApi } from "../localApi";
 import { useRightPanelStore } from "../rightPanelStore";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
@@ -210,11 +211,16 @@ export function findProjectForChangeRequest(
  * the pull requests page: a reader following a link the agent wrote is reading the thread, and
  * should still be reading it afterwards. Any change request opens there, not only the thread's
  * own, since the panel is told which one to show.
+ *
+ * Settings → General turns this off for readers who want every pull request link in their
+ * browser, in which case nothing here claims a link at all.
  */
+/** Command-click (control-click off macOS) always means the browser; `openInApp` decides the rest. */
 export function shouldOpenPullRequestExternally(
   event: Pick<MouseEvent<HTMLElement>, "metaKey" | "ctrlKey">,
+  openInApp: boolean,
 ): boolean {
-  return event.metaKey || event.ctrlKey;
+  return !openInApp || event.metaKey || event.ctrlKey;
 }
 
 export function useOpenChangeRequestLink(
@@ -228,12 +234,13 @@ export function useOpenChangeRequestLink(
   targetThreadRef?: ScopedThreadRef,
 ) => boolean {
   const navigate = useNavigate();
+  const openInApp = useClientSettings((settings) => settings.openPullRequestLinksInApp);
   const allProjects = useProjects();
   const serverConfigs = useServerConfigs();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   return useCallback(
     (event, targetUrl, targetThreadRef) => {
-      if (shouldOpenPullRequestExternally(event)) return false;
+      if (shouldOpenPullRequestExternally(event, openInApp)) return false;
       const resolvedThreadRef = targetThreadRef ?? threadRef;
       const parsed = parseChangeRequestUrl(targetUrl);
       if (parsed === null) return false;
@@ -285,16 +292,17 @@ export function useOpenChangeRequestLink(
       });
       return true;
     },
-    [allProjects, navigate, primaryEnvironmentId, serverConfigs, threadRef],
+    [allProjects, navigate, openInApp, primaryEnvironmentId, serverConfigs, threadRef],
   );
 }
 
 export function useOpenPrLink(threadRef?: ScopedThreadRef) {
   const openChangeRequest = useOpenChangeRequestLink(threadRef);
+  const openInApp = useClientSettings((settings) => settings.openPullRequestLinksInApp);
   return useCallback(
     (event: MouseEvent<HTMLElement>, prUrl: string, targetThreadRef?: ScopedThreadRef) => {
       event.stopPropagation();
-      const openInBrowser = shouldOpenPullRequestExternally(event);
+      const openInBrowser = shouldOpenPullRequestExternally(event, openInApp);
       const isAnchor =
         event.currentTarget instanceof HTMLAnchorElement && event.currentTarget.href.length > 0;
       // A real link already knows how to cmd/ctrl+click. Leave its default
@@ -326,6 +334,6 @@ export function useOpenPrLink(threadRef?: ScopedThreadRef) {
       });
       return false;
     },
-    [openChangeRequest],
+    [openChangeRequest, openInApp],
   );
 }

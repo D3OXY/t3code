@@ -507,6 +507,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.diffIgnoreWhitespace !== DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace
         ? ["Diff whitespace changes"]
         : []),
+      ...(settings.openPullRequestLinksInApp !== DEFAULT_UNIFIED_SETTINGS.openPullRequestLinksInApp
+        ? ["Open pull request links in T3 Code"]
+        : []),
       ...(settings.showSkillsInSlashMenu !== DEFAULT_UNIFIED_SETTINGS.showSkillsInSlashMenu
         ? ["Show skills in slash menu"]
         : []),
@@ -572,6 +575,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.glassOpacity,
       settings.enableLegacyTokenStreaming,
       settings.enableProviderUpdateChecks,
+      settings.openPullRequestLinksInApp,
       settings.sidebarAutoSettleAfterDays,
       settings.sidebarAutoSettleOnMerge,
       settings.sidebarProjectGroupingMode,
@@ -652,6 +656,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,
       wordWrap: DEFAULT_UNIFIED_SETTINGS.wordWrap,
       diffIgnoreWhitespace: DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace,
+      openPullRequestLinksInApp: DEFAULT_UNIFIED_SETTINGS.openPullRequestLinksInApp,
       showSkillsInSlashMenu: DEFAULT_UNIFIED_SETTINGS.showSkillsInSlashMenu,
       environmentIdentificationMode: DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode,
       glassOpacity: DEFAULT_UNIFIED_SETTINGS.glassOpacity,
@@ -2077,6 +2082,33 @@ export function GeneralSettingsPanel() {
                 updateSettings({ diffIgnoreWhitespace: Boolean(checked) })
               }
               aria-label="Hide whitespace changes by default"
+            />
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("pull-request-links-in-app")}
+          description="Open pull request links from a thread in the review panel. Turn this off to send every click to your browser; command-click (control-click on Windows and Linux) always opens the browser."
+          resetAction={
+            settings.openPullRequestLinksInApp !==
+            DEFAULT_UNIFIED_SETTINGS.openPullRequestLinksInApp ? (
+              <SettingResetButton
+                label="pull request links"
+                onClick={() =>
+                  updateSettings({
+                    openPullRequestLinksInApp: DEFAULT_UNIFIED_SETTINGS.openPullRequestLinksInApp,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.openPullRequestLinksInApp}
+              onCheckedChange={(checked) =>
+                updateSettings({ openPullRequestLinksInApp: Boolean(checked) })
+              }
+              aria-label="Open pull request links in T3 Code"
             />
           }
         />
