@@ -51,10 +51,10 @@ export class CodexAppServerClient extends Context.Service<
         method: M,
         payload: CodexRpc.ClientRequestParamsByMethod[M],
       ): Effect.Effect<CodexRpc.ClientRequestResponsesByMethod[M], CodexError.CodexAppServerError>;
-      <M extends CodexRpc.ClientRequestMethod, A, I>(
+      <M extends CodexRpc.ClientRequestMethod, A>(
         method: M,
         payload: CodexRpc.ClientRequestParamsByMethod[M],
-        responseSchema: Schema.Codec<A, I>,
+        responseSchema: Schema.Codec<A, unknown>,
       ): Effect.Effect<A, CodexError.CodexAppServerError>;
     };
     readonly notify: <M extends CodexRpc.ClientNotificationMethod>(
@@ -105,6 +105,10 @@ export const make = Effect.fn("effect-codex-app-server/CodexAppServerClient.make
 ): Effect.fn.Return<CodexAppServerClient["Service"], never, Scope.Scope> {
   const requestHandlers = new Map<string, ServerRequestHandler>();
   const notificationHandlers = new Map<string, Array<ServerNotificationHandler>>();
+  // Methods already reported as undecodable. Drift is a property of the method,
+  // not of each message, and high-frequency streams such as agent message
+  // deltas would otherwise warn once per token.
+  const warnedUndecodableMethods = new Set<string>();
   let unknownRequestHandler:
     | ((method: string, params: unknown) => Effect.Effect<unknown, CodexError.CodexAppServerError>)
     | undefined;
@@ -168,10 +172,16 @@ export const make = Effect.fn("effect-codex-app-server/CodexAppServerClient.make
         // session, but it is still protocol drift we want to hear about:
         // discarding it silently hides the loss of a real lifecycle event.
         Effect.tapError((error) =>
-          Effect.logWarning("codex app-server notification dropped", {
-            method: notification.method,
-            cause: error,
-          }),
+          warnedUndecodableMethods.has(notification.method)
+            ? Effect.void
+            : Effect.sync(() => warnedUndecodableMethods.add(notification.method)).pipe(
+                Effect.andThen(
+                  Effect.logWarning("codex app-server notification dropped", {
+                    method: notification.method,
+                    cause: error,
+                  }),
+                ),
+              ),
         ),
         Effect.flatMap((decoded) =>
           Effect.forEach(handlers, (handler) => handler(decoded), { discard: true }),
@@ -217,10 +227,10 @@ export const make = Effect.fn("effect-codex-app-server/CodexAppServerClient.make
     onRequest: dispatchRequest,
   });
 
-  const request = <M extends CodexRpc.ClientRequestMethod, A, I>(
+  const request = <M extends CodexRpc.ClientRequestMethod, A>(
     method: M,
     payload: CodexRpc.ClientRequestParamsByMethod[M],
-    responseSchema?: Schema.Codec<A, I>,
+    responseSchema?: Schema.Codec<A, unknown>,
   ): Effect.Effect<A, CodexError.CodexAppServerError> =>
     encodeOptionalPayload(method, getClientRequestParamSchema(method), payload).pipe(
       Effect.flatMap((encoded) => transport.request(method, encoded)),
@@ -228,7 +238,7 @@ export const make = Effect.fn("effect-codex-app-server/CodexAppServerClient.make
         (raw): Effect.Effect<A, CodexError.CodexAppServerError> =>
           decodeOptionalPayload(
             method,
-            responseSchema ?? (getClientRequestResponseSchema(method) as never),
+            responseSchema ?? (getClientRequestResponseSchema(method) as Schema.Codec<A, unknown>),
             raw,
           ),
       ),

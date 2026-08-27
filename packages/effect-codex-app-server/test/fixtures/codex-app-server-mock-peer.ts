@@ -59,6 +59,22 @@ const handleMethod = (message: Record<string, unknown>) => {
       return;
     }
     case "initialized": {
+      // oxlint-disable-next-line t3code/no-global-process-runtime -- Standalone mock peer process has no Effect runtime.
+      if (process.env.CODEX_APP_SERVER_TEST_DRIFT === "1") {
+        // Two notifications the generated bindings cannot decode, standing in
+        // for a Codex release whose payloads outgrew them.
+        for (let index = 0; index < 2; index += 1) {
+          writeMessage({
+            method: "item/agentMessage/delta",
+            params: {
+              delta: index,
+              itemId: "item-1",
+              threadId: "thread-1",
+              turnId: "turn-1",
+            },
+          });
+        }
+      }
       writeMessage({
         method: "item/agentMessage/delta",
         params: {

@@ -6,6 +6,7 @@ import * as Schema from "effect/Schema";
 import { describe } from "vite-plus/test";
 import { DEFAULT_MODEL, ThreadId } from "@t3tools/contracts";
 import * as CodexErrors from "effect-codex-app-server/errors";
+import * as CodexRpc from "effect-codex-app-server/rpc";
 import * as EffectCodexSchema from "effect-codex-app-server/schema";
 
 import {
@@ -54,24 +55,28 @@ function makeThreadOpenResponse(threadId: string, items: ReadonlyArray<unknown> 
     modelProvider: "openai",
     approvalPolicy: "never",
     approvalsReviewer: "user",
-    sandbox: { type: "danger-full-access" },
+    sandbox: { type: "dangerFullAccess" },
     thread: {
       id: threadId,
-      createdAt: "2026-04-18T00:00:00.000Z",
-      source: { session: "cli" },
+      cliVersion: "0.150.0",
+      createdAt: 0,
+      updatedAt: 0,
+      cwd: "/tmp/project",
+      ephemeral: false,
+      modelProvider: "openai",
+      preview: "",
+      sessionId: "session-1",
+      source: "cli",
+      status: { type: "idle" },
       turns: items.length === 0 ? [] : [{ id: "turn-1", status: "completed", items }],
-      status: {
-        state: "idle",
-        activeFlags: [],
-      },
     },
   };
 }
 
 /**
- * Mirrors the real client: params are ignored, and the raw payload is decoded
- * with whichever response schema the caller supplied, surfacing failures the
- * same way (`operation: "decode-payload"`).
+ * Mirrors the real client: params keep their generated types, and the raw
+ * payload is decoded with whichever response schema the caller supplied,
+ * failing exactly as the client would.
  */
 function makeThreadOpenClient(
   respond: (
@@ -79,23 +84,20 @@ function makeThreadOpenClient(
   ) => Effect.Effect<unknown, CodexErrors.CodexAppServerError>,
 ) {
   return {
-    request: <A, I>(
-      method: "thread/start" | "thread/resume",
-      _payload: unknown,
-      responseSchema: Schema.Codec<A, I>,
+    request: <M extends "thread/start" | "thread/resume", A>(
+      method: M,
+      _payload: CodexRpc.ClientRequestParamsByMethod[M],
+      responseSchema: Schema.Codec<A, unknown>,
     ) =>
       respond(method).pipe(
         Effect.flatMap((raw) =>
           Schema.decodeUnknownEffect(responseSchema)(raw).pipe(
-            Effect.mapError(
-              (cause) =>
-                new CodexErrors.CodexAppServerRequestError({
-                  code: -32603,
-                  errorMessage: `Invalid payload for method '${method}' during 'decode-payload'`,
-                  method,
-                  operation: "decode-payload",
-                  cause,
-                }),
+            Effect.mapError((cause) =>
+              CodexErrors.CodexAppServerRequestError.invalidPayload(
+                method,
+                "decode-payload",
+                cause,
+              ),
             ),
           ),
         ),
@@ -793,7 +795,7 @@ describe("isRecoverableThreadResumeError", () => {
     NodeAssert.equal(
       isRecoverableThreadResumeError(
         new CodexErrors.CodexAppServerRequestError({
-          code: -32603,
+          code: -32602,
           errorMessage: "Invalid payload for method 'thread/resume' during 'decode-payload'",
           method: "thread/resume",
           operation: "decode-payload",

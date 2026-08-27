@@ -1,5 +1,6 @@
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
+import * as Logger from "effect/Logger";
 import * as Path from "effect/Path";
 import * as Effect from "effect/Effect";
 import * as Ref from "effect/Ref";
@@ -159,6 +160,59 @@ it.layer(NodeServices.layer)("effect-codex-app-server client", (it) => {
       assert.equal(result.narrow.thread.id, "resumed-thread");
     }),
   );
+
+  it.effect("drops undecodable notifications, warning once per method", () => {
+    const warnings: Array<string> = [];
+    const logger = Logger.make(({ message }) => {
+      warnings.push(String(message));
+    });
+
+    return Effect.gen(function* () {
+      const deltas = yield* Ref.make<Array<unknown>>([]);
+      const handle = yield* makeHandle({ CODEX_APP_SERVER_TEST_DRIFT: "1" });
+      const scope = yield* Scope.make();
+      const clientLayer = CodexClient.layerChildProcess(handle);
+      const context = yield* Layer.buildWithScope(clientLayer, scope);
+
+      yield* Effect.gen(function* () {
+        const client = yield* CodexClient.CodexAppServerClient;
+        yield* client.handleServerNotification("item/agentMessage/delta", (payload) =>
+          Ref.update(deltas, (current) => [...current, payload]),
+        );
+        yield* client.request("initialize", {
+          clientInfo: {
+            name: "effect-codex-app-server-test",
+            title: "Effect Codex App Server Test",
+            version: "0.0.0",
+          },
+          capabilities: {
+            experimentalApi: true,
+            optOutNotificationMethods: null,
+          },
+        });
+        yield* client.notify("initialized", undefined);
+        // A round trip on the same stdio proves the peer's notifications have
+        // all been read before the assertions below.
+        yield* client.request("account/read", {});
+      }).pipe(Effect.provide(context), Effect.ensuring(Scope.close(scope, Exit.void)));
+
+      // The two undecodable deltas never reach the handler...
+      assert.deepEqual(yield* Ref.get(deltas), [
+        {
+          delta: "Mock server is ready.",
+          itemId: "item-1",
+          threadId: "thread-1",
+          turnId: "turn-1",
+        },
+      ]);
+      // ...and drift is reported once for the method, not once per message.
+      assert.deepEqual(
+        warnings.filter((message) => message.includes("codex app-server notification dropped"))
+          .length,
+        1,
+      );
+    }).pipe(Effect.provide(Logger.layer([logger], { mergeWithExisting: false })));
+  });
 
   it.effect("drains child stderr so large diagnostics cannot block protocol responses", () =>
     Effect.gen(function* () {

@@ -694,8 +694,8 @@ export function isRecoverableThreadResumeError(error: unknown): boolean {
  */
 const CodexThreadOpenResponse = Schema.Struct({
   thread: Schema.Struct({ id: Schema.String }),
-  cwd: Schema.optional(Schema.String),
-  model: Schema.optional(Schema.String),
+  cwd: Schema.String,
+  model: Schema.String,
 });
 
 type CodexThreadOpenResponse = typeof CodexThreadOpenResponse.Type;
@@ -2279,8 +2279,8 @@ export const makeCodexSessionRuntime = (
       const session = {
         ...(yield* Ref.get(sessionRef)),
         status: "ready",
-        cwd: opened.cwd ?? options.cwd,
-        model: opened.model ?? requestedModel,
+        cwd: opened.cwd,
+        model: opened.model,
         resumeCursor: { threadId: providerThreadId },
         updatedAt: yield* nowIso,
       } satisfies ProviderSession;
