@@ -1640,28 +1640,16 @@ const makeWsRpcLayer = (
         [WS_METHODS.providerListSkills]: (input) =>
           observeRpcEffect(
             WS_METHODS.providerListSkills,
-            queryProviderSkills(input, {
-              getProvider: (instanceId) =>
-                Effect.gen(function* () {
-                  const instance = yield* providerInstanceRegistry.getInstance(instanceId);
-                  if (!instance) return undefined;
-                  const snapshot = yield* instance.snapshot.getSnapshot;
-                  return {
-                    fallbackSkills: snapshot.skills,
-                    ...(instance.listSkillsForCwd
-                      ? { listSkillsForCwd: instance.listSkillsForCwd }
-                      : {}),
-                  };
-                }),
-              getProject: (projectId) =>
-                projectionSnapshotQuery
-                  .getProjectShellById(projectId)
-                  .pipe(Effect.orElseSucceed(() => Option.none())),
-              getThread: (threadId) =>
-                projectionSnapshotQuery
-                  .getThreadShellById(threadId)
-                  .pipe(Effect.orElseSucceed(() => Option.none())),
-            }),
+            queryProviderSkills(input).pipe(
+              Effect.provideService(
+                ProviderInstanceRegistry.ProviderInstanceRegistry,
+                providerInstanceRegistry,
+              ),
+              Effect.provideService(
+                ProjectionSnapshotQuery.ProjectionSnapshotQuery,
+                projectionSnapshotQuery,
+              ),
+            ),
             { "rpc.aggregate": "provider" },
           ),
         [WS_METHODS.providerUploadFeedback]: (input) =>

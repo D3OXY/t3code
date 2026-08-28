@@ -1,40 +1,13 @@
 import type {
-  ProjectId,
-  ProviderInstanceId,
   ProviderSkillsListInput,
   ProviderSkillsListResult,
   ServerProviderSkill,
-  ThreadId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 
-interface ProviderSkillsProject {
-  readonly id: ProjectId;
-  readonly workspaceRoot: string;
-}
-
-interface ProviderSkillsThread {
-  readonly projectId: ProjectId;
-  readonly worktreePath: string | null;
-}
-
-interface ProviderSkillsSource {
-  readonly fallbackSkills: ReadonlyArray<ServerProviderSkill>;
-  readonly listSkillsForCwd?: (
-    cwd: string,
-  ) => Effect.Effect<Option.Option<ReadonlyArray<ServerProviderSkill>>>;
-}
-
-export interface ProviderSkillsQueryDependencies {
-  readonly getProvider: (
-    instanceId: ProviderInstanceId,
-  ) => Effect.Effect<ProviderSkillsSource | undefined>;
-  readonly getProject: (
-    projectId: ProjectId,
-  ) => Effect.Effect<Option.Option<ProviderSkillsProject>>;
-  readonly getThread: (threadId: ThreadId) => Effect.Effect<Option.Option<ProviderSkillsThread>>;
-}
+import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as ProviderInstanceRegistry from "./Services/ProviderInstanceRegistry.ts";
 
 const providerSnapshotResult = (
   skills: ReadonlyArray<ServerProviderSkill>,
@@ -45,32 +18,43 @@ const providerSnapshotResult = (
 
 export const queryProviderSkills = Effect.fn("queryProviderSkills")(function* (
   input: ProviderSkillsListInput,
-  dependencies: ProviderSkillsQueryDependencies,
-): Effect.fn.Return<ProviderSkillsListResult> {
-  const provider = yield* dependencies.getProvider(input.instanceId);
-  if (!provider) {
+): Effect.fn.Return<
+  ProviderSkillsListResult,
+  never,
+  | ProjectionSnapshotQuery.ProjectionSnapshotQuery
+  | ProviderInstanceRegistry.ProviderInstanceRegistry
+> {
+  const providerRegistry = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
+  const snapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
+  const instance = yield* providerRegistry.getInstance(input.instanceId);
+  if (!instance) {
     return providerSnapshotResult([]);
   }
-  if (!provider.listSkillsForCwd) {
-    return providerSnapshotResult(provider.fallbackSkills);
+  const fallbackSkills = (yield* instance.snapshot.getSnapshot).skills;
+  if (!instance.listSkillsForCwd) {
+    return providerSnapshotResult(fallbackSkills);
   }
 
-  const project = yield* dependencies.getProject(input.projectId);
+  const project = yield* snapshotQuery
+    .getProjectShellById(input.projectId)
+    .pipe(Effect.orElseSucceed(() => Option.none()));
   if (Option.isNone(project)) {
-    return providerSnapshotResult(provider.fallbackSkills);
+    return providerSnapshotResult(fallbackSkills);
   }
 
   let cwd = project.value.workspaceRoot;
   if (input.threadId) {
-    const thread = yield* dependencies.getThread(input.threadId);
+    const thread = yield* snapshotQuery
+      .getThreadShellById(input.threadId)
+      .pipe(Effect.orElseSucceed(() => Option.none()));
     if (Option.isSome(thread) && thread.value.projectId === input.projectId) {
       cwd = thread.value.worktreePath ?? cwd;
     }
   }
 
-  const skills = yield* provider.listSkillsForCwd(cwd);
+  const skills = yield* instance.listSkillsForCwd(cwd);
   if (Option.isNone(skills)) {
-    return providerSnapshotResult(provider.fallbackSkills);
+    return providerSnapshotResult(fallbackSkills);
   }
   return {
     source: "workspace",
