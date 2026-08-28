@@ -12,6 +12,7 @@
  * @module provider/Drivers/CursorDriver
  */
 import { CursorSettings, ProviderDriverKind, type ServerProvider } from "@t3tools/contracts";
+import * as Cache from "effect/Cache";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -39,6 +40,7 @@ import {
   type ProviderInstance,
 } from "../ProviderDriver.ts";
 import type { ServerProviderDraft } from "../providerSnapshot.ts";
+import { makeProviderSkillsCache } from "../providerSkillsCache.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import {
   makeProviderMaintenanceCapabilities,
@@ -50,6 +52,7 @@ import {
   makeProviderSnapshotSettingsSource,
   type ProviderSnapshotSettings,
 } from "../providerUpdateSettings.ts";
+import { discoverCursorSkills } from "./CursorSkills.ts";
 const decodeCursorSettings = Schema.decodeSync(CursorSettings);
 
 const DRIVER_KIND = ProviderDriverKind.make("cursor");
@@ -132,6 +135,13 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
         instanceId,
       });
       const textGeneration = yield* makeCursorTextGeneration(effectiveConfig, processEnv);
+      const skillsCache = yield* makeProviderSkillsCache((workspaceCwd) =>
+        discoverCursorSkills(workspaceCwd, processEnv).pipe(
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          Effect.provideService(Path.Path, path),
+          Effect.option,
+        ),
+      );
 
       const checkProvider = checkCursorProviderStatus(effectiveConfig, processEnv, cwd).pipe(
         Effect.map(stampIdentity),
@@ -182,6 +192,7 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
         accentColor,
         enabled,
         snapshot,
+        listSkillsForCwd: (workspaceCwd) => Cache.get(skillsCache, workspaceCwd),
         adapter,
         textGeneration,
       } satisfies ProviderInstance;

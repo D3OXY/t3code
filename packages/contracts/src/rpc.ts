@@ -167,6 +167,8 @@ import {
 import {
   ServerConfigStreamEvent,
   ServerConfig,
+  ProviderSkillsListInput,
+  ProviderSkillsListResult,
   ServerProviderUpdateError,
   ServerProviderUpdateInput,
   ServerLifecycleStreamEvent,
@@ -227,6 +229,7 @@ export const WS_METHODS = {
   attachmentsDelete: "attachments.delete",
 
   // Provider methods
+  providerListSkills: "provider.listSkills",
   providerUploadFeedback: "provider.uploadFeedback",
 
   // VCS methods
@@ -368,6 +371,12 @@ export const WsServerRefreshProvidersRpc = Rpc.make(WS_METHODS.serverRefreshProv
     instanceId: Schema.optional(ProviderInstanceId),
   }),
   success: ServerProviderUpdatedPayload,
+  error: EnvironmentAuthorizationError,
+});
+
+export const WsProviderListSkillsRpc = Rpc.make(WS_METHODS.providerListSkills, {
+  payload: ProviderSkillsListInput,
+  success: ProviderSkillsListResult,
   error: EnvironmentAuthorizationError,
 });
 
@@ -1030,6 +1039,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerProbeRpc,
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,
+  WsProviderListSkillsRpc,
   WsServerUpdateProviderRpc,
   WsServerUpdateServerRpc,
   WsServerUpdateServerWithProgressRpc,

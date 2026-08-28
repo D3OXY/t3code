@@ -3,6 +3,7 @@ import type {
   ExplicitSkillInvocation,
   ProviderInteractionMode,
   ServerProvider,
+  ServerProviderSkill,
 } from "@t3tools/contracts";
 import {
   detectComposerTrigger,
@@ -27,6 +28,7 @@ export function useComposerCommandMenu({
   environmentId,
   projectCwd,
   selectedProviderStatus,
+  skills,
   hasThread,
   enabled = true,
   onChangeDraftMessage,
@@ -36,6 +38,9 @@ export function useComposerCommandMenu({
   readonly environmentId: EnvironmentId | null;
   readonly projectCwd: string | null;
   readonly selectedProviderStatus: ServerProvider | null;
+  // Scoped to the composer's workspace, so it can differ from the provider
+  // snapshot's environment-wide list.
+  readonly skills: ReadonlyArray<ServerProviderSkill>;
   readonly hasThread: boolean;
   readonly enabled?: boolean;
   // Inserting a skill reports the range it occupies so callers that track
@@ -131,7 +136,7 @@ export function useComposerCommandMenu({
         });
       }
 
-      const skillItems = (selectedProviderStatus?.skills ?? [])
+      const skillItems = skills
         .filter((skill) => matchesSlashSkillQuery(skill, q))
         .map((skill) => ({
           id: `skill:${skill.name}`,
@@ -145,7 +150,7 @@ export function useComposerCommandMenu({
     }
 
     if (trigger.kind === "skill") {
-      const enabledSkills = (selectedProviderStatus?.skills ?? []).filter((skill) => skill.enabled);
+      const enabledSkills = skills.filter((skill) => skill.enabled);
       const normalizedQuery = normalizeSearchQuery(trigger.query, {
         trimLeadingPattern: /^\$+/,
       });
@@ -242,7 +247,14 @@ export function useComposerCommandMenu({
     }
 
     return [];
-  }, [hasThread, onUpdateInteractionMode, pathSearch.entries, selectedProviderStatus, trigger]);
+  }, [
+    hasThread,
+    onUpdateInteractionMode,
+    pathSearch.entries,
+    selectedProviderStatus,
+    skills,
+    trigger,
+  ]);
 
   const onSelect = useCallback(
     (item: ComposerCommandItem) => {

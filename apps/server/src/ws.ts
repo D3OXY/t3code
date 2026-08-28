@@ -93,8 +93,10 @@ import {
   observeRpcStreamEffect as instrumentRpcStreamEffect,
 } from "./observability/RpcInstrumentation.ts";
 import * as ProviderRegistry from "./provider/Services/ProviderRegistry.ts";
+import * as ProviderInstanceRegistry from "./provider/Services/ProviderInstanceRegistry.ts";
 import * as ProviderService from "./provider/Services/ProviderService.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
+import { queryProviderSkills } from "./provider/providerSkills.ts";
 import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
@@ -504,6 +506,7 @@ const makeWsRpcLayer = (
       const previewManager = yield* PreviewManager.PreviewManager;
       const portDiscovery = yield* PortScanner.PortDiscovery;
       const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
+      const providerInstanceRegistry = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
       const providerService = yield* ProviderService.ProviderService;
       const providerMaintenanceRunner = yield* ProviderMaintenanceRunner.ProviderMaintenanceRunner;
       const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
@@ -1633,6 +1636,33 @@ const makeWsRpcLayer = (
               : providerRegistry.refresh()
             ).pipe(Effect.map((providers) => ({ providers }))),
             { "rpc.aggregate": "server" },
+          ),
+        [WS_METHODS.providerListSkills]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.providerListSkills,
+            queryProviderSkills(input, {
+              getProvider: (instanceId) =>
+                Effect.gen(function* () {
+                  const instance = yield* providerInstanceRegistry.getInstance(instanceId);
+                  if (!instance) return undefined;
+                  const snapshot = yield* instance.snapshot.getSnapshot;
+                  return {
+                    fallbackSkills: snapshot.skills,
+                    ...(instance.listSkillsForCwd
+                      ? { listSkillsForCwd: instance.listSkillsForCwd }
+                      : {}),
+                  };
+                }),
+              getProject: (projectId) =>
+                projectionSnapshotQuery
+                  .getProjectShellById(projectId)
+                  .pipe(Effect.orElseSucceed(() => Option.none())),
+              getThread: (threadId) =>
+                projectionSnapshotQuery
+                  .getThreadShellById(threadId)
+                  .pipe(Effect.orElseSucceed(() => Option.none())),
+            }),
+            { "rpc.aggregate": "provider" },
           ),
         [WS_METHODS.providerUploadFeedback]: (input) =>
           observeRpcEffect(

@@ -1,4 +1,5 @@
 import { GrokSettings, ProviderDriverKind, type ServerProvider } from "@t3tools/contracts";
+import * as Cache from "effect/Cache";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -26,6 +27,7 @@ import {
   type ProviderInstance,
 } from "../ProviderDriver.ts";
 import type { ServerProviderDraft } from "../providerSnapshot.ts";
+import { makeProviderSkillsCache } from "../providerSkillsCache.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import {
   makeManualOnlyProviderMaintenanceCapabilities,
@@ -37,6 +39,7 @@ import {
   makeProviderSnapshotSettingsSource,
   type ProviderSnapshotSettings,
 } from "../providerUpdateSettings.ts";
+import { discoverGrokSkills } from "./GrokSkills.ts";
 const decodeGrokSettings = Schema.decodeSync(GrokSettings);
 
 const DRIVER_KIND = ProviderDriverKind.make("grok");
@@ -113,6 +116,12 @@ export const GrokDriver: ProviderDriver<GrokSettings, GrokDriverEnv> = {
         instanceId,
       });
       const textGeneration = yield* makeGrokTextGeneration(effectiveConfig, processEnv);
+      const skillsCache = yield* makeProviderSkillsCache((workspaceCwd) =>
+        discoverGrokSkills(effectiveConfig, processEnv, workspaceCwd).pipe(
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+          Effect.option,
+        ),
+      );
 
       const checkProvider = checkGrokProviderStatus(effectiveConfig, processEnv, cwd).pipe(
         Effect.map(stampIdentity),
@@ -157,6 +166,7 @@ export const GrokDriver: ProviderDriver<GrokSettings, GrokDriverEnv> = {
         accentColor,
         enabled,
         snapshot,
+        listSkillsForCwd: (workspaceCwd) => Cache.get(skillsCache, workspaceCwd),
         adapter,
         textGeneration,
       } satisfies ProviderInstance;

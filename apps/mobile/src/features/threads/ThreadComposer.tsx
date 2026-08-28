@@ -7,6 +7,7 @@ import type {
   ProviderInteractionMode,
   RuntimeMode,
   ServerConfig as T3ServerConfig,
+  ServerProviderSkill,
 } from "@t3tools/contracts";
 import { updateExplicitSkillInvocationsForTextEdit } from "@t3tools/shared/explicitSkillInvocations";
 import { StackActions, useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -83,6 +84,7 @@ export interface ThreadComposerProps {
   readonly threadSyncPhase?: "loading" | "syncing" | null;
   readonly selectedThread: OrchestrationThreadShell;
   readonly serverConfig: T3ServerConfig | null;
+  readonly skills: ReadonlyArray<ServerProviderSkill>;
   readonly queueCount: number;
   readonly environmentId: EnvironmentId;
   readonly projectCwd: string | null;
@@ -353,6 +355,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     environmentId: props.environmentId,
     projectCwd: props.projectCwd,
     selectedProviderStatus,
+    skills: props.skills,
     hasThread: true,
     onChangeDraftMessage: handleDraftMessageChange,
     onUpdateInteractionMode: props.onUpdateInteractionMode,
@@ -564,7 +567,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
               ref={inputRef}
               multiline
               value={props.draftMessage}
-              skills={selectedProviderStatus?.skills ?? []}
+              skills={props.skills}
               selection={composerMenu.selection}
               onChangeText={handleDraftMessageChange}
               onSelectionChange={composerMenu.onSelectionChange}

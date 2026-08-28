@@ -13,6 +13,7 @@
  * @module provider/Drivers/OpenCodeDriver
  */
 import { OpenCodeSettings, ProviderDriverKind, type ServerProvider } from "@t3tools/contracts";
+import * as Cache from "effect/Cache";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -29,6 +30,7 @@ import { ProviderDriverError } from "../Errors.ts";
 import { makeOpenCodeAdapter } from "../Layers/OpenCodeAdapter.ts";
 import {
   checkOpenCodeProviderStatus,
+  discoverOpenCodeSkills,
   makePendingOpenCodeProvider,
 } from "../Layers/OpenCodeProvider.ts";
 import { ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
@@ -41,6 +43,7 @@ import {
   type ProviderInstance,
 } from "../ProviderDriver.ts";
 import type { ServerProviderDraft } from "../providerSnapshot.ts";
+import { makeProviderSkillsCache } from "../providerSkillsCache.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import {
   enrichProviderSnapshotWithVersionAdvisory,
@@ -150,6 +153,13 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
           : {}),
         environment: processEnv,
       });
+      const skillsCache = yield* makeProviderSkillsCache((workspaceCwd) =>
+        discoverOpenCodeSkills(effectiveConfig, workspaceCwd).pipe(
+          Effect.provideService(OpenCodeServerOwner.OpenCodeServerOwner, serverOwner),
+          Effect.provideService(OpenCodeRuntime, openCodeRuntime),
+          Effect.option,
+        ),
+      );
       const textGeneration = yield* makeOpenCodeTextGeneration(effectiveConfig).pipe(
         Effect.provideService(OpenCodeServerOwner.OpenCodeServerOwner, serverOwner),
       );
@@ -204,6 +214,7 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
         accentColor,
         enabled,
         snapshot,
+        listSkillsForCwd: (workspaceCwd) => Cache.get(skillsCache, workspaceCwd),
         adapter,
         textGeneration,
       } satisfies ProviderInstance;

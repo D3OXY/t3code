@@ -281,6 +281,55 @@ function flattenOpenCodeSkills(input: OpenCodeInventory): ReadonlyArray<ServerPr
   return skills.toSorted((left, right) => left.name.localeCompare(right.name));
 }
 
+/**
+ * Loads the inventory a single workspace sees. A local server is borrowed from
+ * the instance's shared owner; an externally configured one is connected to for
+ * the call. Both the status probe and workspace skill discovery go through here
+ * so they never disagree about which server answered.
+ */
+const loadOpenCodeInventoryForCwd = Effect.fn("loadOpenCodeInventoryForCwd")(function* (
+  openCodeSettings: OpenCodeSettings,
+  cwd: string,
+) {
+  const openCodeRuntime = yield* OpenCodeRuntime;
+  const serverOwner = yield* OpenCodeServerOwner.OpenCodeServerOwner;
+  const loadInventory = (server: {
+    readonly url: string;
+    readonly serverPassword?: string;
+    readonly version: string;
+  }) =>
+    openCodeRuntime
+      .loadOpenCodeInventory(
+        openCodeRuntime.createOpenCodeSdkClient({
+          baseUrl: server.url,
+          directory: cwd,
+          ...(server.serverPassword !== undefined ? { serverPassword: server.serverPassword } : {}),
+        }),
+      )
+      .pipe(Effect.map((inventory) => ({ inventory, version: server.version })));
+
+  return yield* openCodeSettings.serverUrl.trim().length === 0
+    ? serverOwner.withServer(loadInventory)
+    : openCodeRuntime
+        .connectToOpenCodeServer({
+          binaryPath: openCodeSettings.binaryPath,
+          directory: cwd,
+          serverUrl: openCodeSettings.serverUrl,
+          ...(openCodeSettings.serverPassword
+            ? { serverPassword: openCodeSettings.serverPassword }
+            : {}),
+        })
+        .pipe(Effect.flatMap(loadInventory), Effect.scoped);
+});
+
+export const discoverOpenCodeSkills = Effect.fn("discoverOpenCodeSkills")(function* (
+  openCodeSettings: OpenCodeSettings,
+  cwd: string,
+) {
+  const { inventory } = yield* loadOpenCodeInventoryForCwd(openCodeSettings, cwd);
+  return flattenOpenCodeSkills(inventory);
+});
+
 export const makePendingOpenCodeProvider = (
   openCodeSettings: OpenCodeSettings,
 ): Effect.Effect<ServerProviderDraft> =>
@@ -431,34 +480,8 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
     }
   }
 
-  const loadInventory = (server: {
-    readonly url: string;
-    readonly serverPassword?: string;
-    readonly version: string;
-  }) =>
-    openCodeRuntime
-      .loadOpenCodeInventory(
-        openCodeRuntime.createOpenCodeSdkClient({
-          baseUrl: server.url,
-          directory: cwd,
-          ...(server.serverPassword !== undefined ? { serverPassword: server.serverPassword } : {}),
-        }),
-      )
-      .pipe(Effect.map((inventory) => ({ inventory, version: server.version })));
-  const inventoryEffect = isExternalServer
-    ? openCodeRuntime
-        .connectToOpenCodeServer({
-          binaryPath: openCodeSettings.binaryPath,
-          directory: cwd,
-          serverUrl: openCodeSettings.serverUrl,
-          ...(openCodeSettings.serverPassword
-            ? { serverPassword: openCodeSettings.serverPassword }
-            : {}),
-        })
-        .pipe(Effect.flatMap(loadInventory), Effect.scoped)
-    : serverOwner.withServer(loadInventory);
   const inventoryExit = yield* Effect.exit(
-    inventoryEffect.pipe(
+    loadOpenCodeInventoryForCwd(openCodeSettings, cwd).pipe(
       Effect.mapError(
         (cause) => new OpenCodeProbeError({ cause, detail: openCodeRuntimeErrorDetail(cause) }),
       ),

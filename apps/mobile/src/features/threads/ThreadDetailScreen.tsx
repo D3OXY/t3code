@@ -60,6 +60,7 @@ import type { DraftComposerImageAttachment } from "../../lib/composerImages";
 import { CHAT_CONTENT_MAX_WIDTH, type LayoutVariant } from "../../lib/layout";
 import { IOS_NAV_BAR_HEIGHT } from "../../lib/layoutMetrics";
 import { scopedThreadKey } from "../../lib/scopedEntities";
+import { useProviderSkills } from "../../state/providerSkills";
 import type {
   PendingApproval,
   PendingUserInput,
@@ -452,12 +453,20 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
   const contentMaxWidth = isSplitLayout ? CHAT_CONTENT_MAX_WIDTH : undefined;
   const selectedInstanceId = props.selectedThread.modelSelection.instanceId;
   useStreamingHaptics(props.selectedThread.id, props.selectedThreadFeed);
-  const selectedProviderSkills = useMemo(
+  const selectedProviderSnapshot = useMemo(
     () =>
-      props.serverConfig?.providers.find((provider) => provider.instanceId === selectedInstanceId)
-        ?.skills ?? [],
+      props.serverConfig?.providers.find(
+        (provider) => provider.instanceId === selectedInstanceId,
+      ) ?? null,
     [props.serverConfig, selectedInstanceId],
   );
+  const selectedProviderSkills = useProviderSkills({
+    environmentId: props.environmentId,
+    instanceId: selectedInstanceId,
+    projectId: props.selectedThread.projectId,
+    threadId: props.selectedThread.id,
+    fallback: selectedProviderSnapshot?.skills ?? [],
+  });
 
   useLayoutEffect(() => {
     selectedThreadKeyRef.current = selectedThreadKey;
@@ -757,6 +766,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                 threadSyncPhase={threadSyncPhase}
                 selectedThread={props.selectedThread}
                 serverConfig={props.serverConfig}
+                skills={selectedProviderSkills}
                 queueCount={props.selectedThreadQueueCount}
                 environmentId={props.environmentId}
                 projectCwd={props.projectWorkspaceRoot}

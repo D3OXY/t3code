@@ -25,8 +25,10 @@ import type {
   ProviderDriverKind,
   ProviderInstanceEnvironment,
   ProviderInstanceId,
+  ServerProviderSkill,
 } from "@t3tools/contracts";
 import type * as Effect from "effect/Effect";
+import type * as Option from "effect/Option";
 import type * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 
@@ -69,6 +71,9 @@ export interface ProviderInstance {
   readonly accentColor?: string | undefined;
   readonly enabled: boolean;
   readonly snapshot: ServerProviderShape;
+  readonly listSkillsForCwd?: (
+    cwd: string,
+  ) => Effect.Effect<Option.Option<ReadonlyArray<ServerProviderSkill>>>;
   readonly adapter: ProviderAdapterShape<ProviderAdapterError>;
   readonly textGeneration: TextGeneration.TextGeneration["Service"];
 }

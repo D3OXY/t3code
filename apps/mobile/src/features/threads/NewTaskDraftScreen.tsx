@@ -226,6 +226,7 @@ export function NewTaskDraftScreen(props: {
         ? selectedProject?.workspaceRoot
         : (flow.selectedWorktreePath ?? selectedProject?.workspaceRoot)) || null,
     selectedProviderStatus: flow.selectedProviderStatus,
+    skills: flow.selectedProviderSkills,
     hasThread: false,
     enabled: isComposerFocused && !isIncomingShareTransferPending,
     onChangeDraftMessage: flow.setPrompt,

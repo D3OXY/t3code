@@ -318,12 +318,11 @@ export function buildCodexInitializeParams(): CodexSchema.V1InitializeParams {
   };
 }
 
-const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(function* (input: {
+const connectCodexAppServer = Effect.fn("connectCodexAppServer")(function* (input: {
   readonly binaryPath: string;
   readonly homePath?: string;
   readonly launchArgs?: string;
   readonly cwd: string;
-  readonly customModels?: ReadonlyArray<string>;
   readonly environment?: NodeJS.ProcessEnv;
 }) {
   // `~` is not shell-expanded when env vars are set via `child_process.spawn`,
@@ -379,6 +378,31 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
     },
   });
   yield* client.notify("initialized", undefined);
+
+  return { client, initialize };
+});
+
+export const discoverCodexSkills = Effect.fn("discoverCodexSkills")(function* (input: {
+  readonly binaryPath: string;
+  readonly homePath?: string;
+  readonly launchArgs?: string;
+  readonly cwd: string;
+  readonly environment?: NodeJS.ProcessEnv;
+}) {
+  const { client } = yield* connectCodexAppServer(input);
+  const response = yield* client.request("skills/list", { cwds: [input.cwd] });
+  return parseCodexSkillsListResponse(response, input.cwd);
+});
+
+const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(function* (input: {
+  readonly binaryPath: string;
+  readonly homePath?: string;
+  readonly launchArgs?: string;
+  readonly cwd: string;
+  readonly customModels?: ReadonlyArray<string>;
+  readonly environment?: NodeJS.ProcessEnv;
+}) {
+  const { client, initialize } = yield* connectCodexAppServer(input);
 
   // Extract the version string after the first '/' in userAgent, up to the next space or the end
   const versionMatch = initialize.userAgent.match(/\/([^\s]+)/);
