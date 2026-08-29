@@ -42,11 +42,22 @@ use the skills and commands from the selected environment and provider.
 
 By default, the `/` menu includes skills. To keep this menu command-only, turn off **Show skills in
 slash menu** in **Settings → General**. Skill results use the `/skill:Skill Name` label and add the
-same `$name` skill token to your message. The original skill name remains searchable. If the provider
-also reports that skill as a native slash command, T3 Code hides the duplicate native entry and keeps
-the `/skill:Skill Name` label.
+same `$name` skill chip to your message. When you send the message, T3 passes the selected skill
+explicitly to the provider. Typing ordinary dollar-prefixed text does not invoke a skill. If the
+provider also reports that skill as a native slash command, T3 Code hides the duplicate native entry
+and keeps the `/skill:Skill Name` label.
 
 On desktop, press `Cmd+Enter` on macOS or `Ctrl+Enter` on Windows and Linux from a new thread to
 start it in the background. T3 Code opens another new thread and shows an **Open** action for the
 thread that started. The new thread keeps the selected workspace mode and base branch. If **New
 worktree** is selected, each background thread creates its own worktree.
+
+## Cursor skills
+
+When a thread uses Cursor, type `$` in the composer to search the skills T3 Code found. Choose a
+skill to add it to your message. T3 Code passes the selected skill's instructions to Cursor
+explicitly, including when several skills are selected in one message.
+
+T3 Code finds skills stored in your project or user skill folders. Cursor-managed built-in,
+marketplace, and plugin skills are not shown because Cursor does not make that list available to
+T3 Code.

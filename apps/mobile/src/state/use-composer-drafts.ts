@@ -1,10 +1,12 @@
 import { useAtomValue } from "@effect/atom-react";
 import {
   ModelSelection as ModelSelectionSchema,
+  ExplicitSkillInvocation as ExplicitSkillInvocationSchema,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   ProviderInteractionMode as ProviderInteractionModeSchema,
   RuntimeMode as RuntimeModeSchema,
   type EnvironmentId,
+  type ExplicitSkillInvocation,
   type ModelSelection,
   type ProviderInteractionMode,
   type RuntimeMode,
@@ -40,6 +42,7 @@ export class ComposerDraftPersistenceError extends Schema.TaggedErrorClass<Compo
 
 export interface ComposerDraft {
   readonly text: string;
+  readonly skillInvocations?: ReadonlyArray<ExplicitSkillInvocation>;
   readonly attachments: ReadonlyArray<DraftComposerImageAttachment>;
   readonly importedShareIds?: ReadonlyArray<string>;
   readonly modelSelection?: ModelSelection;
@@ -50,6 +53,7 @@ export interface ComposerDraft {
 
 export interface ComposerDraftContent {
   readonly text: string;
+  readonly skillInvocations?: ReadonlyArray<ExplicitSkillInvocation>;
   readonly attachments: ReadonlyArray<DraftComposerImageAttachment>;
   readonly sourceShareId?: string;
 }
@@ -75,6 +79,7 @@ const ComposerDraftWorkspaceSelectionSchema = Schema.Struct({
 
 const ComposerDraftSchema = Schema.Struct({
   text: Schema.String,
+  skillInvocations: Schema.optional(Schema.Array(ExplicitSkillInvocationSchema)),
   attachments: Schema.Array(DraftComposerImageAttachmentSchema),
   importedShareIds: Schema.optional(Schema.Array(Schema.String)),
   modelSelection: Schema.optional(ModelSelectionSchema),
@@ -361,11 +366,18 @@ export function setStickyComposerModelSelection(modelSelection: ModelSelection):
   schedulePersistComposerState();
 }
 
-export function setComposerDraftText(draftKey: string, value: string): void {
+export function setComposerDraftText(
+  draftKey: string,
+  value: string,
+  skillInvocations?: ReadonlyArray<ExplicitSkillInvocation>,
+): void {
   updateComposerDrafts((current) => {
+    const existing = normalizeDraft(current[draftKey]);
+    const { skillInvocations: _skillInvocations, ...draftWithoutSkills } = existing;
     const draft = {
-      ...normalizeDraft(current[draftKey]),
+      ...(skillInvocations === undefined ? existing : draftWithoutSkills),
       text: value,
+      ...(skillInvocations && skillInvocations.length > 0 ? { skillInvocations } : {}),
     };
     if (isEmptyDraft(draft)) {
       const next = { ...current };
@@ -487,6 +499,7 @@ export function clearComposerDraftContentState(
   const {
     importedShareIds: _importedShareIds,
     modelSelection,
+    skillInvocations: _skillInvocations,
     workspaceSelection,
     ...retained
   } = existing;
@@ -550,6 +563,7 @@ export function copyComposerDraftContentState(
     [targetDraftKey]: {
       ...target,
       text: source.text,
+      ...(source.skillInvocations ? { skillInvocations: source.skillInvocations } : {}),
       attachments: source.attachments,
       ...(source.importedShareIds ? { importedShareIds: source.importedShareIds } : {}),
     },
@@ -584,6 +598,13 @@ function mergeComposerDraftText(existing: string, incoming: string): string {
   return `${existing}\n\n${incoming}`;
 }
 
+function mergedTextOffset(existing: string, incoming: string): number | null {
+  if (incoming.length === 0) return null;
+  if (existing.length === 0 || existing === incoming) return 0;
+  if (existing.endsWith(`\n\n${incoming}`)) return existing.length - incoming.length;
+  return existing.length + 2;
+}
+
 export function mergeComposerDraftContentState(
   current: Record<string, ComposerDraft>,
   draftKey: string,
@@ -606,13 +627,35 @@ export function mergeComposerDraftContentState(
     PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   );
   const text = mergeComposerDraftText(existing.text, content.text);
+  const incomingTextOffset = mergedTextOffset(existing.text, content.text);
+  const skillInvocations = [...(existing.skillInvocations ?? [])];
+  if (incomingTextOffset !== null) {
+    for (const invocation of content.skillInvocations ?? []) {
+      const shifted = {
+        ...invocation,
+        start: invocation.start + incomingTextOffset,
+        end: invocation.end + incomingTextOffset,
+      };
+      if (
+        !skillInvocations.some(
+          (existingInvocation) =>
+            existingInvocation.name === shifted.name &&
+            existingInvocation.start === shifted.start &&
+            existingInvocation.end === shifted.end,
+        )
+      ) {
+        skillInvocations.push(shifted);
+      }
+    }
+  }
   const importedShareIds = content.sourceShareId
     ? [...(existing.importedShareIds ?? []), content.sourceShareId]
     : existing.importedShareIds;
   if (
     text === existing.text &&
     attachments.length === existing.attachments.length &&
-    importedShareIds === existing.importedShareIds
+    importedShareIds === existing.importedShareIds &&
+    skillInvocations.length === (existing.skillInvocations?.length ?? 0)
   ) {
     return current;
   }
@@ -621,6 +664,7 @@ export function mergeComposerDraftContentState(
     [draftKey]: {
       ...existing,
       text,
+      ...(skillInvocations.length > 0 ? { skillInvocations } : {}),
       attachments,
       ...(importedShareIds ? { importedShareIds } : {}),
     },

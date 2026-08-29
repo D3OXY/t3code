@@ -246,6 +246,22 @@ export type ChatAttachment = typeof ChatAttachment.Type;
 const UploadChatAttachment = Schema.Union([UploadChatImageAttachment]);
 export type UploadChatAttachment = typeof UploadChatAttachment.Type;
 
+/** A skill chip the user explicitly selected in the composer. Offsets refer to the sent text. */
+export const ExplicitSkillInvocation = Schema.Struct({
+  name: TrimmedNonEmptyString.check(Schema.isMaxLength(255)),
+  start: NonNegativeInt,
+  end: NonNegativeInt,
+}).check(
+  Schema.makeFilter(
+    (input: { readonly start: number; readonly end: number }) =>
+      input.end > input.start || "Skill invocation end must be greater than start.",
+  ),
+);
+export type ExplicitSkillInvocation = typeof ExplicitSkillInvocation.Type;
+export const ExplicitSkillInvocations = Schema.Array(ExplicitSkillInvocation).check(
+  Schema.isMaxLength(256),
+);
+
 export const ProjectScriptIcon = Schema.Literals([
   "play",
   "test",
@@ -900,6 +916,7 @@ export const ThreadTurnStartCommand = Schema.Struct({
     role: Schema.Literal("user"),
     text: Schema.String,
     attachments: Schema.Array(ChatAttachment),
+    skillInvocations: Schema.optional(ExplicitSkillInvocations),
   }),
   modelSelection: Schema.optional(ModelSelection),
   titleSeed: Schema.optional(TrimmedNonEmptyString),
@@ -921,6 +938,7 @@ const ClientThreadTurnStartCommand = Schema.Struct({
     role: Schema.Literal("user"),
     text: Schema.String,
     attachments: Schema.Array(Schema.Union([UploadChatAttachment, ChatAttachment])),
+    skillInvocations: Schema.optional(ExplicitSkillInvocations),
   }),
   modelSelection: Schema.optional(ModelSelection),
   titleSeed: Schema.optional(TrimmedNonEmptyString),
@@ -1317,6 +1335,7 @@ export const ThreadMessageSentPayload = Schema.Struct({
 export const ThreadTurnStartRequestedPayload = Schema.Struct({
   threadId: ThreadId,
   messageId: MessageId,
+  skillInvocations: Schema.optional(ExplicitSkillInvocations),
   modelSelection: Schema.optional(ModelSelection),
   titleSeed: Schema.optional(TrimmedNonEmptyString),
   runtimeMode: RuntimeMode.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE))),

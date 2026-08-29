@@ -121,6 +121,16 @@ describe("ProviderSessionStartInput", () => {
 });
 
 describe("ProviderSendTurnInput", () => {
+  it("accepts explicit skill invocation ranges", () => {
+    const parsed = decodeProviderSendTurnInput({
+      threadId: "thread-1",
+      input: "Use $review",
+      skillInvocations: [{ name: "review", start: 4, end: 11 }],
+    });
+
+    expect(parsed.skillInvocations).toEqual([{ name: "review", start: 4, end: 11 }]);
+  });
+
   it("accepts codex modelSelection", () => {
     const parsed = decodeProviderSendTurnInput({
       threadId: "thread-1",

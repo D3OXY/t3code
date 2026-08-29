@@ -383,6 +383,38 @@ describe("mobile composer drafts", () => {
     });
   });
 
+  it("persists explicit skill ranges and clears them with sent content", () => {
+    const draftKey = "environment-1:thread-1";
+    const draft = decodePersistedComposerDrafts({
+      schemaVersion: 1,
+      drafts: {
+        [draftKey]: {
+          text: "$review this",
+          skillInvocations: [{ name: "review", start: 0, end: 7 }],
+          attachments: [],
+        },
+      },
+    })[draftKey];
+
+    expect(draft?.skillInvocations).toEqual([{ name: "review", start: 0, end: 7 }]);
+    expect(clearComposerDraftContentState({ [draftKey]: draft! }, draftKey)).toEqual({});
+  });
+
+  it("restores skill ranges when a failed send merges into matching text", () => {
+    const draftKey = "environment-1:thread-1";
+    const merged = mergeComposerDraftContentState(
+      { [draftKey]: { text: "$review this", attachments: [] } },
+      draftKey,
+      {
+        text: "$review this",
+        skillInvocations: [{ name: "review", start: 0, end: 7 }],
+        attachments: [],
+      },
+    );
+
+    expect(merged[draftKey]?.skillInvocations).toEqual([{ name: "review", start: 0, end: 7 }]);
+  });
+
   it("clears sent content without clearing the selected model or workspace", () => {
     const draftKey = "environment-1:thread-1";
     const draft: ComposerDraft = {

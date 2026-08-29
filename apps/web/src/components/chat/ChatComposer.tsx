@@ -1,6 +1,7 @@
 import type {
   ApprovalRequestId,
   EnvironmentId,
+  ExplicitSkillInvocation,
   ModelSelection,
   PreviewAnnotationPayload,
   ProviderApprovalDecision,
@@ -536,6 +537,7 @@ export interface ChatComposerHandle {
     cursor: number;
     expandedCursor: number;
     terminalContextIds: string[];
+    skillInvocations: ExplicitSkillInvocation[];
   };
   /** Reset composer cursor/trigger/highlight after external prompt mutations (e.g. onSend). */
   resetCursorState: (options?: {
@@ -561,6 +563,7 @@ export interface ChatComposerHandle {
     selectedProvider: ProviderDriverKind;
     selectedModel: string;
     selectedProviderModels: ReadonlyArray<ServerProvider["models"][number]>;
+    skillInvocations: ExplicitSkillInvocation[];
   };
   /** Validate the fully composed text immediately before a provider turn starts. */
   validateProviderInput: (providerInput: string) => boolean;
@@ -1912,6 +1915,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     cursor: number;
     expandedCursor: number;
     terminalContextIds: string[];
+    skillInvocations: ExplicitSkillInvocation[];
   } => {
     const editorSnapshot = composerEditorRef.current?.readSnapshot();
     if (editorSnapshot) {
@@ -1922,6 +1926,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       cursor: composerCursor,
       expandedCursor: expandCollapsedComposerCursor(promptRef.current, composerCursor),
       terminalContextIds: composerTerminalContexts.map((context) => context.id),
+      skillInvocations: [],
     };
   }, [composerCursor, composerTerminalContexts, promptRef]);
 
@@ -3286,22 +3291,28 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           composerEditorRef.current?.focusAt(nextCollapsedCursor);
         });
       },
-      getSendContext: () => ({
-        prompt: promptRef.current,
-        images: composerImagesRef.current,
-        files: composerFilesRef.current,
-        terminalContexts: composerTerminalContextsRef.current,
-        elementContexts: composerElementContextsRef.current,
-        previewAnnotations: composerPreviewAnnotations,
-        reviewComments: composerReviewComments,
-        selectedPromptEffort,
-        selectedModelOptionsForDispatch,
-        selectedModelSelection,
-        providerAvailable: !noProviderAvailable,
-        selectedProvider,
-        selectedModel,
-        selectedProviderModels,
-      }),
+      getSendContext: () => {
+        const snapshot = isComposerApprovalState
+          ? undefined
+          : composerEditorRef.current?.readSnapshot();
+        return {
+          prompt: snapshot?.value ?? promptRef.current,
+          images: composerImagesRef.current,
+          files: composerFilesRef.current,
+          terminalContexts: composerTerminalContextsRef.current,
+          elementContexts: composerElementContextsRef.current,
+          previewAnnotations: composerPreviewAnnotations,
+          reviewComments: composerReviewComments,
+          selectedPromptEffort,
+          selectedModelOptionsForDispatch,
+          selectedModelSelection,
+          providerAvailable: !noProviderAvailable,
+          selectedProvider,
+          selectedModel,
+          selectedProviderModels,
+          skillInvocations: snapshot?.skillInvocations ?? [],
+        };
+      },
       validateProviderInput: (providerInput: string) => {
         const validationMessage = getComposerSubmissionValidationMessage({
           prompt: promptRef.current,

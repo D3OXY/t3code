@@ -540,8 +540,9 @@ describe("ProviderCommandReactor", () => {
         message: {
           messageId: asMessageId("user-message-1"),
           role: "user",
-          text: "hello reactor",
+          text: "  hello $reactor  ",
           attachments: [],
+          skillInvocations: [{ name: "reactor", start: 8, end: 16 }],
         },
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         runtimeMode: "approval-required",
@@ -566,6 +567,10 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.session?.threadId).toBe("thread-1");
     expect(thread?.session?.status).toBe("starting");
     expect(thread?.session?.runtimeMode).toBe("approval-required");
+    expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
+      input: "hello $reactor",
+      skillInvocations: [{ name: "reactor", start: 6, end: 14 }],
+    });
   });
 
   effectIt.effect("projects starting before a slow provider session finishes", () =>

@@ -9,10 +9,12 @@ import {
   type OrchestrationSession,
   ThreadId,
   type ProviderSession,
+  type ProviderSendTurnInput,
   type RuntimeMode,
   type TurnId,
 } from "@t3tools/contracts";
 import { isTemporaryWorktreeBranch, WORKTREE_BRANCH_PREFIX } from "@t3tools/shared/git";
+import { remapExplicitSkillInvocations } from "@t3tools/shared/explicitSkillInvocations";
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
@@ -775,6 +777,7 @@ const make = Effect.gen(function* () {
     readonly threadId: ThreadId;
     readonly messageText: string;
     readonly attachments?: ReadonlyArray<ChatAttachment>;
+    readonly skillInvocations?: ProviderSendTurnInput["skillInvocations"];
     readonly modelSelection?: ModelSelection;
     readonly interactionMode?: "default" | "plan";
     readonly createdAt: string;
@@ -794,6 +797,13 @@ const make = Effect.gen(function* () {
     }
     const normalizedInput = toNonEmptyProviderInput(input.messageText);
     const normalizedAttachments = input.attachments ?? [];
+    const skillInvocations = normalizedInput
+      ? remapExplicitSkillInvocations({
+          sourceText: input.messageText,
+          outgoingText: normalizedInput,
+          invocations: input.skillInvocations ?? [],
+        })
+      : [];
     const activeSession = yield* providerService
       .listSessions()
       .pipe(
@@ -826,6 +836,7 @@ const make = Effect.gen(function* () {
       threadId: input.threadId,
       ...(normalizedInput ? { input: normalizedInput } : {}),
       ...(normalizedAttachments.length > 0 ? { attachments: normalizedAttachments } : {}),
+      ...(skillInvocations !== undefined ? { skillInvocations } : {}),
       ...(modelForTurn !== undefined ? { modelSelection: modelForTurn } : {}),
       ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
     };
@@ -1206,6 +1217,9 @@ const make = Effect.gen(function* () {
       threadId: event.payload.threadId,
       messageText: message.text,
       ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
+      ...(event.payload.skillInvocations !== undefined
+        ? { skillInvocations: event.payload.skillInvocations }
+        : {}),
       ...(event.payload.modelSelection !== undefined
         ? { modelSelection: event.payload.modelSelection }
         : {}),

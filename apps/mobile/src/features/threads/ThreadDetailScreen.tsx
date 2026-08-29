@@ -6,6 +6,7 @@ import { HeaderHeightContext } from "@react-navigation/elements";
 import type {
   ApprovalRequestId,
   EnvironmentId,
+  ExplicitSkillInvocation,
   MessageId,
   ModelSelection,
   OrchestrationThreadShell,
@@ -96,6 +97,7 @@ export interface ThreadDetailScreenProps {
   readonly activePendingUserInputAnswers: Record<string, string | ReadonlyArray<string>> | null;
   readonly respondingUserInputId: ApprovalRequestId | null;
   readonly draftMessage: string;
+  readonly draftSkillInvocations: ReadonlyArray<ExplicitSkillInvocation>;
   readonly draftAttachments: ReadonlyArray<DraftComposerImageAttachment>;
   readonly connectionStateLabel: EnvironmentConnectionPhase;
   /** Message sync status for the selected thread (drives the composer status pill). */
@@ -111,7 +113,10 @@ export interface ThreadDetailScreenProps {
   readonly usesAutomaticContentInsets?: boolean;
   readonly onHeaderMaterialVisibilityChange?: (visible: boolean) => void;
   readonly onOpenConnectionEditor: () => void;
-  readonly onChangeDraftMessage: (value: string) => void;
+  readonly onChangeDraftMessage: (
+    value: string,
+    skillInvocations: ReadonlyArray<ExplicitSkillInvocation>,
+  ) => void;
   readonly onPickDraftImages: () => Promise<void>;
   readonly onNativePasteImages: (uris: ReadonlyArray<string>) => Promise<void>;
   readonly onRemoveDraftImage: (imageId: string) => void;
@@ -742,6 +747,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
               <ThreadComposer
                 editorRef={composerEditorRef}
                 draftMessage={props.draftMessage}
+                draftSkillInvocations={props.draftSkillInvocations}
                 draftAttachments={props.draftAttachments}
                 placeholder="Ask the repo agent, or run a command…"
                 contentMaxWidth={contentMaxWidth}

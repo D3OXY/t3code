@@ -17,7 +17,9 @@ import type { ClaudeSettings, ServerProviderSkill } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
-import { parse as parseYamlDocument } from "yaml";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
+import { fromYaml } from "@t3tools/shared/schemaYaml";
 
 import { expandHomePath } from "../../pathExpansion.ts";
 
@@ -25,10 +27,38 @@ type ClaudeSkillScope = "user" | "project";
 
 const FRONTMATTER_PATTERN = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
 
+const ClaudeSkillFrontmatter = fromYaml(
+  Schema.Struct({
+    name: Schema.optional(Schema.String),
+    description: Schema.optional(Schema.String),
+    "user-invocable": Schema.optional(Schema.Boolean),
+  }),
+);
+const decodeClaudeSkillFrontmatter = Schema.decodeUnknownOption(ClaudeSkillFrontmatter);
+const decodeClaudeSkillFrontmatterRecord = Schema.decodeUnknownOption(
+  fromYaml(Schema.Record(Schema.String, Schema.Unknown)),
+);
+
+const UNSUPPORTED_FALLBACK_FIELDS = [
+  "allowed-tools",
+  "disallowed-tools",
+  "model",
+  "context",
+  "agent",
+  "background",
+  "hooks",
+  "arguments",
+] as const;
+
 type SkillFrontmatter =
   | { readonly kind: "missing" }
   | { readonly kind: "malformed" }
-  | { readonly kind: "parsed"; readonly name?: string; readonly description?: string };
+  | {
+      readonly kind: "parsed";
+      readonly name?: string;
+      readonly description?: string;
+      readonly userInvocable: boolean;
+    };
 
 function parseSkillFrontmatter(contents: string): SkillFrontmatter {
   const match = FRONTMATTER_PATTERN.exec(contents);
@@ -36,23 +66,94 @@ function parseSkillFrontmatter(contents: string): SkillFrontmatter {
     return { kind: "missing" };
   }
 
-  let parsed: unknown;
-  try {
-    parsed = parseYamlDocument(match[1] ?? "");
-  } catch {
-    return { kind: "malformed" };
-  }
-  if (typeof parsed !== "object" || parsed === null) {
+  const parsed = Option.getOrUndefined(decodeClaudeSkillFrontmatter(match[1] ?? ""));
+  if (!parsed) {
     return { kind: "malformed" };
   }
 
-  const record = parsed as Record<string, unknown>;
-  const name = typeof record.name === "string" ? record.name.trim() : "";
-  const description = typeof record.description === "string" ? record.description.trim() : "";
+  const name = parsed.name?.trim() ?? "";
+  const description = parsed.description?.trim() ?? "";
   return {
     kind: "parsed",
+    userInvocable: parsed["user-invocable"] !== false,
     ...(name ? { name } : {}),
     ...(description ? { description } : {}),
+  };
+}
+
+function splitClaudeSkillArguments(value: string): ReadonlyArray<string> {
+  const arguments_: string[] = [];
+  let current = "";
+  let quote: "'" | '"' | null = null;
+  let escaped = false;
+  for (const character of value) {
+    if (escaped) {
+      current += character;
+      escaped = false;
+    } else if (character === "\\" && quote !== "'") {
+      escaped = true;
+    } else if (quote) {
+      if (character === quote) quote = null;
+      else current += character;
+    } else if (character === "'" || character === '"') {
+      quote = character;
+    } else if (/\s/.test(character)) {
+      if (current.length > 0) {
+        arguments_.push(current);
+        current = "";
+      }
+    } else {
+      current += character;
+    }
+  }
+  if (escaped) current += "\\";
+  if (current.length > 0) arguments_.push(current);
+  return arguments_;
+}
+
+export type PreparedClaudeSkillContents =
+  | { readonly kind: "prepared"; readonly contents: string }
+  | { readonly kind: "malformed" }
+  | { readonly kind: "unsupported"; readonly fields: ReadonlyArray<string> };
+
+/**
+ * Prepares a Claude skill for providers that cannot ask Claude Code to invoke
+ * it natively. Argument placeholders are expanded; runtime-only frontmatter
+ * is rejected so the fallback never silently weakens a skill's contract.
+ */
+export function prepareClaudeSkillContents(
+  contents: string,
+  argumentsText: string,
+): PreparedClaudeSkillContents {
+  const match = FRONTMATTER_PATTERN.exec(contents);
+  const body = match ? contents.slice(match[0].length).trimStart() : contents;
+  if (match) {
+    const frontmatter = Option.getOrUndefined(decodeClaudeSkillFrontmatterRecord(match[1] ?? ""));
+    if (!frontmatter) return { kind: "malformed" };
+    const fields = UNSUPPORTED_FALLBACK_FIELDS.filter((field) => frontmatter[field] !== undefined);
+    if (fields.length > 0) return { kind: "unsupported", fields };
+  }
+
+  const positionalArguments = splitClaudeSkillArguments(argumentsText);
+  let substituted = false;
+  const prepared = body.replace(
+    /(\\*)\$(?:ARGUMENTS(?:\[(\d+)\])?|(\d+))/g,
+    (token, backslashes: string, indexed: string | undefined, shorthand: string | undefined) => {
+      const placeholder = token.slice(backslashes.length);
+      if (backslashes.length === 1) return placeholder;
+      substituted = true;
+      const index = indexed ?? shorthand;
+      const replacement =
+        index === undefined ? argumentsText : (positionalArguments[Number(index)] ?? placeholder);
+      return `${backslashes}${replacement}`;
+    },
+  );
+  return {
+    kind: "prepared",
+    contents:
+      !substituted && argumentsText.length > 0
+        ? `${prepared.trimEnd()}\n\nARGUMENTS: ${argumentsText}`
+        : prepared,
   };
 }
 
@@ -131,6 +232,9 @@ export const discoverClaudeSkills = Effect.fn("discoverClaudeSkills")(function* 
       // either — skip it rather than surfacing a broken entry under its
       // directory name.
       if (frontmatter.kind === "malformed") {
+        continue;
+      }
+      if (frontmatter.kind === "parsed" && !frontmatter.userInvocable) {
         continue;
       }
 

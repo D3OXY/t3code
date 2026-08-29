@@ -911,6 +911,18 @@ it.effect("decodes thread.turn-start-requested source proposed plan metadata whe
   }),
 );
 
+it.effect("decodes explicit skill invocation metadata when present", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeThreadTurnStartRequestedPayload({
+      threadId: "thread-2",
+      messageId: "msg-2",
+      skillInvocations: [{ name: "review", start: 4, end: 11 }],
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    assert.deepStrictEqual(parsed.skillInvocations, [{ name: "review", start: 4, end: 11 }]);
+  }),
+);
+
 it.effect("decodes thread.turn-start-requested title seed when present", () =>
   Effect.gen(function* () {
     const parsed = yield* decodeThreadTurnStartRequestedPayload({

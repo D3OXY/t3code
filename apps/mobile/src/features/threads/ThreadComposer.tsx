@@ -1,5 +1,6 @@
 import type {
   EnvironmentId,
+  ExplicitSkillInvocation,
   MessageId,
   ModelSelection,
   OrchestrationThreadShell,
@@ -7,6 +8,7 @@ import type {
   RuntimeMode,
   ServerConfig as T3ServerConfig,
 } from "@t3tools/contracts";
+import { updateExplicitSkillInvocationsForTextEdit } from "@t3tools/shared/explicitSkillInvocations";
 import { StackActions, useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { ReactNode } from "react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
@@ -65,6 +67,7 @@ export const COMPOSER_EXPANDED_CHROME = 156;
 
 export interface ThreadComposerProps {
   readonly draftMessage: string;
+  readonly draftSkillInvocations: ReadonlyArray<ExplicitSkillInvocation>;
   readonly draftAttachments: ReadonlyArray<DraftComposerImageAttachment>;
   readonly placeholder: string;
   readonly contentMaxWidth?: number;
@@ -84,7 +87,10 @@ export interface ThreadComposerProps {
   readonly environmentId: EnvironmentId;
   readonly projectCwd: string | null;
   readonly editorRef?: RefObject<ComposerEditorHandle | null>;
-  readonly onChangeDraftMessage: (value: string) => void;
+  readonly onChangeDraftMessage: (
+    value: string,
+    skillInvocations: ReadonlyArray<ExplicitSkillInvocation>,
+  ) => void;
   readonly onPickDraftImages: () => Promise<void>;
   readonly onNativePasteImages: (uris: ReadonlyArray<string>) => Promise<void>;
   readonly onRemoveDraftImage: (imageId: string) => void;
@@ -245,7 +251,19 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
   const settingsRoutePresentedRef = useRef(false);
   const wasExpandedBeforePreviewRef = useRef(false);
   const inFlightThreadIdsRef = useRef(new Set<string>());
+  const skillInvocationsRef = useRef<ExplicitSkillInvocation[]>([...props.draftSkillInvocations]);
+  const previousDraftMessageRef = useRef(props.draftMessage);
   const { onExpandedChange } = props;
+
+  useEffect(() => {
+    previousDraftMessageRef.current = props.draftMessage;
+    skillInvocationsRef.current = [...props.draftSkillInvocations];
+  }, [
+    props.draftMessage,
+    props.draftSkillInvocations,
+    props.environmentId,
+    props.selectedThread.id,
+  ]);
 
   const [previewImageUri, setPreviewImageUri] = useState<string | null>(null);
   const hasContent = props.draftMessage.trim().length > 0 || props.draftAttachments.length > 0;
@@ -309,13 +327,34 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     );
   }, [props.serverConfig, props.selectedThread.modelSelection.instanceId]);
 
+  const { onChangeDraftMessage } = props;
+  // Keeps the draft's `$skill` ranges aligned with the text they point at, and
+  // records the range when the command menu inserts a skill.
+  const handleDraftMessageChange = useCallback(
+    (nextMessage: string, addedInvocation?: ExplicitSkillInvocation) => {
+      const previousMessage = previousDraftMessageRef.current;
+      skillInvocationsRef.current = updateExplicitSkillInvocationsForTextEdit({
+        previousText: previousMessage,
+        nextText: nextMessage,
+        invocations: skillInvocationsRef.current,
+      });
+      if (addedInvocation) {
+        skillInvocationsRef.current.push(addedInvocation);
+        skillInvocationsRef.current.sort((left, right) => left.start - right.start);
+      }
+      previousDraftMessageRef.current = nextMessage;
+      onChangeDraftMessage(nextMessage, skillInvocationsRef.current);
+    },
+    [onChangeDraftMessage],
+  );
+
   const composerMenu = useComposerCommandMenu({
     draftMessage: props.draftMessage,
     environmentId: props.environmentId,
     projectCwd: props.projectCwd,
     selectedProviderStatus,
     hasThread: true,
-    onChangeDraftMessage: props.onChangeDraftMessage,
+    onChangeDraftMessage: handleDraftMessageChange,
     onUpdateInteractionMode: props.onUpdateInteractionMode,
   });
   const { onSendMessage } = props;
@@ -329,6 +368,8 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
       if (messageId === null) {
         return;
       }
+      skillInvocationsRef.current = [];
+      previousDraftMessageRef.current = "";
       // Sending a prompt starts agent work: arm the lock-screen card while the
       // app is foregrounded and the activity token can be registered. Armed
       // after the send so its preference read and native Activity start don't
@@ -525,7 +566,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
               value={props.draftMessage}
               skills={selectedProviderStatus?.skills ?? []}
               selection={composerMenu.selection}
-              onChangeText={props.onChangeDraftMessage}
+              onChangeText={handleDraftMessageChange}
               onSelectionChange={composerMenu.onSelectionChange}
               onPasteImages={(uris) => void props.onNativePasteImages(uris)}
               placeholder={props.placeholder}

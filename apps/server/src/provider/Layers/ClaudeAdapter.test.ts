@@ -782,6 +782,60 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("explicitly injects a selected skill document into Claude prompts", () => {
+    const baseDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "claude-skills-"));
+    const configDir = NodePath.join(baseDir, "claude-home");
+    const skillsDir = NodePath.join(configDir, "skills", "wayfinder");
+    NodeFS.mkdirSync(skillsDir, { recursive: true });
+    NodeFS.writeFileSync(
+      NodePath.join(skillsDir, "SKILL.md"),
+      [
+        "---",
+        "name: wayfinder",
+        "description: Plan and document the work.",
+        "disable-model-invocation: true",
+        "---",
+        "",
+        "# Wayfinder",
+        "Map the work before implementation.",
+      ].join("\n"),
+    );
+    const harness = makeHarness({
+      baseDir,
+      cwd: NodePath.join(baseDir, "workspace"),
+      claudeConfig: { homePath: configDir },
+    });
+
+    return Effect.gen(function* () {
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => NodeFS.rmSync(baseDir, { recursive: true, force: true })),
+      );
+      const adapter = yield* ClaudeAdapter;
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+
+      yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "Use $wayfinder to plan this change.",
+        skillInvocations: [{ name: "wayfinder", start: 4, end: 14 }],
+        attachments: [],
+      });
+
+      const promptText = yield* Effect.promise(() =>
+        readFirstPromptText(harness.getLastCreateQueryInput()),
+      );
+      assert.include(promptText ?? "", "Map the work before implementation.");
+      assert.include(promptText ?? "", "[T3 explicitly invoked skill: wayfinder]");
+      assert.notInclude(promptText ?? "", "$wayfinder");
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("embeds image attachments in Claude user messages", () => {
     const baseDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "claude-attachments-"));
     const harness = makeHarness({

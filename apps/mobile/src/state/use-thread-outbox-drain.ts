@@ -227,6 +227,9 @@ export function useThreadOutboxDrain(): void {
             role: "user",
             text: queuedMessage.text,
             attachments: toUploadChatImageAttachments(queuedMessage.attachments),
+            ...(queuedMessage.skillInvocations !== undefined
+              ? { skillInvocations: queuedMessage.skillInvocations }
+              : {}),
           },
           modelSelection: settings.modelSelection,
           runtimeMode: settings.runtimeMode,

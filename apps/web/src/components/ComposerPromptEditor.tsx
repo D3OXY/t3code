@@ -5,7 +5,7 @@ import { LexicalErrorBoundary } from "@lexical/react/LexicalErrorBoundary";
 import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin";
 import { OnChangePlugin } from "@lexical/react/LexicalOnChangePlugin";
 import { PlainTextPlugin } from "@lexical/react/LexicalPlainTextPlugin";
-import { type ServerProviderSkill } from "@t3tools/contracts";
+import { type ExplicitSkillInvocation, type ServerProviderSkill } from "@t3tools/contracts";
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
 import {
   $applyNodeReplacement,
@@ -230,17 +230,19 @@ type ComposerSkillMetadata = {
   description: string | null;
 };
 
-function skillMetadataByName(
+function enabledSkillMetadataByName(
   skills: ReadonlyArray<ServerProviderSkill>,
 ): ReadonlyMap<string, ComposerSkillMetadata> {
   return new Map(
-    skills.map((skill) => [
-      skill.name,
-      {
-        label: formatProviderSkillDisplayName(skill),
-        description: resolveSkillDescription(skill),
-      },
-    ]),
+    skills
+      .filter((skill) => skill.enabled)
+      .map((skill) => [
+        skill.name,
+        {
+          label: formatProviderSkillDisplayName(skill),
+          description: resolveSkillDescription(skill),
+        },
+      ]),
   );
 }
 
@@ -865,6 +867,23 @@ function collectTerminalContextIds(node: LexicalNode): string[] {
   return [];
 }
 
+function collectExplicitSkillInvocations(
+  node: LexicalNode,
+  skillMetadata: ReadonlyMap<string, ComposerSkillMetadata>,
+): ExplicitSkillInvocation[] {
+  if (node instanceof ComposerSkillNode) {
+    if (!skillMetadata.has(node.__skillName)) return [];
+    const start = getExpandedAbsoluteOffsetForPoint(node, 0);
+    return [{ name: node.__skillName, start, end: start + node.getTextContentSize() }];
+  }
+  if ($isElementNode(node)) {
+    return node
+      .getChildren()
+      .flatMap((child) => collectExplicitSkillInvocations(child, skillMetadata));
+  }
+  return [];
+}
+
 export interface ComposerPromptEditorHandle {
   focus: () => void;
   focusAt: (cursor: number) => void;
@@ -874,6 +893,7 @@ export interface ComposerPromptEditorHandle {
     cursor: number;
     expandedCursor: number;
     terminalContextIds: string[];
+    skillInvocations: ExplicitSkillInvocation[];
   };
 }
 
@@ -1266,7 +1286,7 @@ function ComposerSurroundSelectionPlugin(props: {
 }) {
   const [editor] = useLexicalComposerContext();
   const terminalContextsRef = useRef(props.terminalContexts);
-  const skillMetadataRef = useRef(skillMetadataByName(props.skills));
+  const skillMetadataRef = useRef(enabledSkillMetadataByName(props.skills));
   const pendingSurroundSelectionRef = useRef<{
     value: string;
     expandedStart: number;
@@ -1283,7 +1303,7 @@ function ComposerSurroundSelectionPlugin(props: {
   }, [props.terminalContexts]);
 
   useEffect(() => {
-    skillMetadataRef.current = skillMetadataByName(props.skills);
+    skillMetadataRef.current = enabledSkillMetadataByName(props.skills);
   }, [props.skills]);
 
   const applySurroundInsertion = useEffectEvent((inputData: string): boolean => {
@@ -1547,12 +1567,13 @@ function ComposerPromptEditorInner({
   const terminalContextsSignatureRef = useRef(terminalContextsSignature);
   const skillsSignature = skillSignature(skills);
   const skillsSignatureRef = useRef(skillsSignature);
-  const skillMetadataRef = useRef(skillMetadataByName(skills));
+  const skillMetadataRef = useRef(enabledSkillMetadataByName(skills));
   const snapshotRef = useRef({
     value,
     cursor: initialCursor,
     expandedCursor: expandCollapsedComposerCursor(value, initialCursor),
     terminalContextIds: terminalContexts.map((context) => context.id),
+    skillInvocations: [] as ExplicitSkillInvocation[],
   });
   const isApplyingControlledUpdateRef = useRef(false);
   const terminalContextActions = useMemo(
@@ -1565,7 +1586,7 @@ function ComposerPromptEditorInner({
   }, [onChange]);
 
   useLayoutEffect(() => {
-    skillMetadataRef.current = skillMetadataByName(skills);
+    skillMetadataRef.current = enabledSkillMetadataByName(skills);
   }, [skills]);
 
   useEffect(() => {
@@ -1591,6 +1612,7 @@ function ComposerPromptEditorInner({
       cursor: normalizedCursor,
       expandedCursor: expandCollapsedComposerCursor(value, normalizedCursor),
       terminalContextIds: terminalContexts.map((context) => context.id),
+      skillInvocations: [],
     };
     terminalContextsSignatureRef.current = terminalContextsSignature;
     skillsSignatureRef.current = skillsSignature;
@@ -1631,6 +1653,7 @@ function ComposerPromptEditorInner({
         cursor: boundedCursor,
         expandedCursor: expandCollapsedComposerCursor(snapshotRef.current.value, boundedCursor),
         terminalContextIds: snapshotRef.current.terminalContextIds,
+        skillInvocations: snapshotRef.current.skillInvocations,
       };
       onChangeRef.current(
         snapshotRef.current.value,
@@ -1648,6 +1671,7 @@ function ComposerPromptEditorInner({
     cursor: number;
     expandedCursor: number;
     terminalContextIds: string[];
+    skillInvocations: ExplicitSkillInvocation[];
   } => {
     let snapshot = snapshotRef.current;
     editor.getEditorState().read(() => {
@@ -1666,11 +1690,16 @@ function ComposerPromptEditorInner({
         $readExpandedSelectionOffsetFromEditorState(fallbackExpandedCursor),
       );
       const terminalContextIds = collectTerminalContextIds($getRoot());
+      const skillInvocations = collectExplicitSkillInvocations(
+        $getRoot(),
+        skillMetadataRef.current,
+      );
       snapshot = {
         value: nextValue,
         cursor: nextCursor,
         expandedCursor: nextExpandedCursor,
         terminalContextIds,
+        skillInvocations,
       };
     });
     snapshotRef.current = snapshot;
@@ -1714,13 +1743,26 @@ function ComposerPromptEditorInner({
         $readExpandedSelectionOffsetFromEditorState(fallbackExpandedCursor),
       );
       const terminalContextIds = collectTerminalContextIds($getRoot());
+      const skillInvocations = collectExplicitSkillInvocations(
+        $getRoot(),
+        skillMetadataRef.current,
+      );
       const previousSnapshot = snapshotRef.current;
       if (
         previousSnapshot.value === nextValue &&
         previousSnapshot.cursor === nextCursor &&
         previousSnapshot.expandedCursor === nextExpandedCursor &&
         previousSnapshot.terminalContextIds.length === terminalContextIds.length &&
-        previousSnapshot.terminalContextIds.every((id, index) => id === terminalContextIds[index])
+        previousSnapshot.terminalContextIds.every(
+          (id, index) => id === terminalContextIds[index],
+        ) &&
+        previousSnapshot.skillInvocations.length === skillInvocations.length &&
+        previousSnapshot.skillInvocations.every(
+          (invocation, index) =>
+            invocation.name === skillInvocations[index]?.name &&
+            invocation.start === skillInvocations[index]?.start &&
+            invocation.end === skillInvocations[index]?.end,
+        )
       ) {
         return;
       }
@@ -1732,6 +1774,7 @@ function ComposerPromptEditorInner({
         cursor: nextCursor,
         expandedCursor: nextExpandedCursor,
         terminalContextIds,
+        skillInvocations,
       };
       const cursorAdjacentToMention =
         isCollapsedCursorAdjacentToInlineToken(nextValue, nextCursor, "left") ||
@@ -1803,7 +1846,7 @@ export function ComposerPromptEditor({
 }: ComposerPromptEditorProps) {
   const initialValueRef = useRef(value);
   const initialTerminalContextsRef = useRef(terminalContexts);
-  const initialSkillMetadataRef = useRef(skillMetadataByName(skills));
+  const initialSkillMetadataRef = useRef(enabledSkillMetadataByName(skills));
   const initialConfig = useMemo<InitialConfigType>(
     () => ({
       namespace: "t3tools-composer-editor",
