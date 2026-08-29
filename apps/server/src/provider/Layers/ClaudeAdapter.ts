@@ -35,6 +35,7 @@ import {
   type ProviderRuntimeTurnStatus,
   type ProviderSendTurnInput,
   type ProviderSession,
+  type ServerProviderSkill,
   type ThreadTokenUsageSnapshot,
   type ProviderUserInputAnswers,
   type RuntimeContentStreamKind,
@@ -79,6 +80,7 @@ import { ServerConfig } from "../../config.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import { resolveClaudeSdkExecutablePath } from "../Drivers/ClaudeExecutable.ts";
 import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
+import { discoverClaudeSkills, prepareClaudeSkillContents } from "../Drivers/ClaudeSkills.ts";
 import {
   getClaudeModelCapabilities,
   isClaudeUltracodeEffort,
@@ -96,6 +98,11 @@ import {
   type ProviderAdapterError,
 } from "../Errors.ts";
 import { type ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
+import {
+  replaceExplicitSkillInvocations,
+  renderProviderSkillPrompt,
+  loadInvokedSkills,
+} from "../skillInvocations.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 const encodeUnknownJsonStringExit = Schema.encodeUnknownExit(Schema.fromJsonString(Schema.Unknown));
 const decodeUnknownJsonStringExit = Schema.decodeUnknownExit(Schema.fromJsonString(Schema.Unknown));
@@ -273,6 +280,7 @@ function rememberPendingTaskModel(
 
 interface ClaudeSessionContext {
   session: ProviderSession;
+  readonly skills: ReadonlyArray<ServerProviderSkill>;
   readonly promptQueue: Queue.Queue<PromptQueueItem>;
   readonly query: ClaudeQueryRuntime;
   streamFiber: Fiber.Fiber<void, Error> | undefined;
@@ -1716,6 +1724,76 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
 
   const sessions = new Map<ThreadId, ClaudeSessionContext>();
   const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
+
+  const discoverSkills = (cwd?: string) =>
+    discoverClaudeSkills(claudeSettings, cwd, claudeEnvironment).pipe(
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.provideService(Path.Path, path),
+    );
+
+  const prepareSkillPrompt = (input: ProviderSendTurnInput, context: ClaudeSessionContext) =>
+    Effect.gen(function* () {
+      const prompt = input.input?.trim();
+      const invocations = input.skillInvocations ?? [];
+      if (!prompt || invocations.length === 0) {
+        return undefined;
+      }
+
+      const resolved = yield* loadInvokedSkills({
+        provider: PROVIDER,
+        providerLabel: "Claude",
+        prompt,
+        invocations,
+        skills: context.skills,
+        readFile: (skillPath) =>
+          fileSystem.readFileString(skillPath).pipe(
+            Effect.mapError(
+              (cause) =>
+                new ProviderAdapterRequestError({
+                  provider: PROVIDER,
+                  method: "turn/start",
+                  detail: `Failed to read Claude skill '${skillPath}'.`,
+                  cause,
+                }),
+            ),
+          ),
+      });
+      const argumentsText = replaceExplicitSkillInvocations(
+        prompt,
+        resolved.invocations,
+        () => "",
+      ).trim();
+      const documents = resolved.documents.map((document) => ({
+        ...document,
+        prepared: prepareClaudeSkillContents(document.contents, argumentsText),
+      }));
+      const malformed = documents.find((document) => document.prepared.kind === "malformed");
+      if (malformed) {
+        return yield* new ProviderAdapterValidationError({
+          provider: PROVIDER,
+          operation: "sendTurn",
+          issue: `Claude skill '$${malformed.name}' has malformed frontmatter.`,
+        });
+      }
+      const unsupported = documents.find((document) => document.prepared.kind === "unsupported");
+      if (unsupported?.prepared.kind === "unsupported") {
+        return yield* new ProviderAdapterValidationError({
+          provider: PROVIDER,
+          operation: "sendTurn",
+          issue: `Claude skill '$${unsupported.name}' requires native runtime fields unsupported by T3's explicit fallback: ${unsupported.prepared.fields.join(", ")}.`,
+        });
+      }
+      return renderProviderSkillPrompt(
+        prompt,
+        documents.map((document) => ({
+          name: document.name,
+          path: document.path,
+          contents:
+            document.prepared.kind === "prepared" ? document.prepared.contents : document.contents,
+        })),
+        resolved.invocations,
+      );
+    });
 
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
   const randomUUIDv4 = crypto.randomUUIDv4.pipe(
@@ -3735,7 +3813,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
 
     // Same reason as the approvals above: a request nobody can answer any more
     // must not stay open, or the thread can never be settled.
-    for (const pending of [...context.pendingUserInputs.values()]) {
+    for (const pending of context.pendingUserInputs.values()) {
       yield* pending.cancel;
     }
 
@@ -3826,6 +3904,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       }
 
       const startedAt = yield* nowIso;
+      const skills = yield* discoverSkills(input.cwd);
       const resumeState = readClaudeResumeState(input.resumeCursor);
       const threadId = input.threadId;
       const existingResumeSessionId = resumeState?.resume;
@@ -4391,6 +4470,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
 
       const context: ClaudeSessionContext = {
         session,
+        skills,
         promptQueue,
         query: queryRuntime,
         streamFiber: undefined,
@@ -4499,6 +4579,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       input.modelSelection !== undefined && input.modelSelection.instanceId === boundInstanceId
         ? input.modelSelection
         : undefined;
+    const skillPrompt = yield* prepareSkillPrompt(input, context);
 
     // A sendTurn while a real turn is running is a steer: the message is
     // queued into the live SDK agent loop and the work continues as the same
@@ -4585,11 +4666,14 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       });
     }
 
-    const message = yield* buildUserMessageEffect(input, {
-      fileSystem,
-      attachmentsDir: serverConfig.attachmentsDir,
-      boundInstanceId,
-    });
+    const message = yield* buildUserMessageEffect(
+      skillPrompt === undefined ? input : { ...input, input: skillPrompt },
+      {
+        fileSystem,
+        attachmentsDir: serverConfig.attachmentsDir,
+        boundInstanceId,
+      },
+    );
 
     yield* Queue.offer(context.promptQueue, {
       type: "message",

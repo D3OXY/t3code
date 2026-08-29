@@ -57,6 +57,7 @@ import { ServerConfig } from "../../config.ts";
 import {
   CodexResumeCursorSchema,
   CodexSessionRuntimeThreadIdMissingError,
+  CodexSessionRuntimeUnknownSkillError,
   describeMcpElicitation,
   makeCodexSessionRuntime,
   type CodexSessionRuntimeError,
@@ -70,6 +71,7 @@ const isCodexAppServerTransportError = Schema.is(CodexErrors.CodexAppServerTrans
 const isCodexSessionRuntimeThreadIdMissingError = Schema.is(
   CodexSessionRuntimeThreadIdMissingError,
 );
+const isCodexSessionRuntimeUnknownSkillError = Schema.is(CodexSessionRuntimeUnknownSkillError);
 const isCodexResumeCursorSchema = Schema.is(CodexResumeCursorSchema);
 
 const PROVIDER = ProviderDriverKind.make("codex");
@@ -113,6 +115,15 @@ function mapCodexRuntimeError(
     return new ProviderAdapterSessionNotFoundError({
       provider: PROVIDER,
       threadId,
+      cause: error,
+    });
+  }
+
+  if (isCodexSessionRuntimeUnknownSkillError(error)) {
+    return new ProviderAdapterValidationError({
+      provider: PROVIDER,
+      operation: "sendTurn",
+      issue: `Unknown Codex skill${error.names.length === 1 ? "" : "s"}: ${error.names.map((name) => `$${name}`).join(", ")}.`,
       cause: error,
     });
   }
@@ -1843,6 +1854,9 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     return yield* session.runtime
       .sendTurn({
         ...(input.input !== undefined ? { input: input.input } : {}),
+        ...(input.skillInvocations !== undefined
+          ? { skillInvocations: input.skillInvocations }
+          : {}),
         ...(input.modelSelection?.instanceId === boundInstanceId
           ? { model: input.modelSelection.model }
           : {}),

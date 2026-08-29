@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   appendTerminalContextsToPrompt,
+  appendTerminalContextsToPromptWithRanges,
   buildTerminalContextPreviewTitle,
   buildTerminalContextBlock,
   countInlineTerminalContextPlaceholders,
@@ -207,5 +208,21 @@ describe("terminalContext", () => {
         [makeContext()],
       ),
     ).toBe("Investigate @terminal-1:12-13 carefully");
+  });
+
+  it("remaps prompt ranges after trimming and materializing terminal labels", () => {
+    const prompt = `  ${INLINE_TERMINAL_CONTEXT_PLACEHOLDER} then $review  `;
+    const start = prompt.indexOf("$review");
+    const result = appendTerminalContextsToPromptWithRanges(
+      prompt,
+      [makeContext()],
+      [{ name: "review", start, end: start + "$review".length }],
+    );
+    const mappedStart = result.prompt.indexOf("$review");
+
+    expect(result.ranges).toEqual([
+      { name: "review", start: mappedStart, end: mappedStart + "$review".length },
+    ]);
+    expect(result.prompt.slice(result.ranges[0]!.start, result.ranges[0]!.end)).toBe("$review");
   });
 });

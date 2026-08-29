@@ -7,6 +7,7 @@
 import {
   ApprovalRequestId,
   type CursorSettings,
+  type ServerProviderSkill,
   type ProviderOptionSelection,
   EventId,
   type ProviderApprovalDecision,
@@ -43,6 +44,7 @@ import type * as EffectAcpSchema from "effect-acp/schema";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
+import { discoverCursorSkills } from "../Drivers/CursorSkills.ts";
 import {
   ProviderAdapterProcessError,
   ProviderAdapterRequestError,
@@ -75,6 +77,7 @@ import {
   extractTodosAsPlan,
 } from "../acp/CursorAcpExtension.ts";
 import { type CursorAdapterShape } from "../Services/CursorAdapter.ts";
+import { renderProviderSkillPrompt, loadInvokedSkills } from "../skillInvocations.ts";
 import { resolveCursorAcpBaseModelId } from "./CursorProvider.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 const encodeUnknownJsonStringExit = Schema.encodeUnknownExit(Schema.fromJsonString(Schema.Unknown));
@@ -133,6 +136,8 @@ interface CursorSessionContext {
   readonly turns: Array<{ id: TurnId; items: Array<unknown> }>;
   lastPlanFingerprint: string | undefined;
   activeTurnId: TurnId | undefined;
+  /** Skills discovered for the session cwd, refreshed lazily before a `$` turn. */
+  skills: ReadonlyArray<ServerProviderSkill>;
   /** Number of sendTurn prompts currently in flight or being prepared.
    * >0 means a turn is actively running, so a new sendTurn is a steer that
    * continues it, and only the last remaining prompt settles the turn. */
@@ -336,6 +341,12 @@ export function makeCursorAdapter(
     const threadLocksRef = yield* SynchronizedRef.make(new Map<string, Semaphore.Semaphore>());
     const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
 
+    const discoverSkills = (cwd?: string) =>
+      discoverCursorSkills(cwd, options?.environment).pipe(
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.provideService(Path.Path, path),
+      );
+
     const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
     const randomUUIDv4 = crypto.randomUUIDv4.pipe(
       Effect.mapError(
@@ -530,6 +541,7 @@ export function makeCursorAdapter(
           const effectiveCursorSettings = options?.resolveSettings
             ? yield* options.resolveSettings
             : cursorSettings;
+          const skills = yield* discoverSkills(cwd);
 
           const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
           const acp = yield* makeCursorAcpRuntime({
@@ -778,6 +790,7 @@ export function makeCursorAdapter(
             turns: [],
             lastPlanFingerprint: undefined,
             activeTurnId: undefined,
+            skills,
             promptsInFlight: 0,
             stopped: false,
           };
@@ -916,6 +929,34 @@ export function makeCursorAdapter(
     const sendTurn: CursorAdapterShape["sendTurn"] = (input) =>
       Effect.gen(function* () {
         const ctx = yield* requireSession(input.threadId);
+        const promptText = input.input?.trim();
+        let preparedPromptText = promptText;
+        if (promptText && input.skillInvocations && input.skillInvocations.length > 0) {
+          const resolved = yield* loadInvokedSkills({
+            provider: PROVIDER,
+            providerLabel: "Cursor",
+            prompt: promptText,
+            invocations: input.skillInvocations,
+            skills: ctx.skills,
+            readFile: (skillPath) =>
+              fileSystem.readFileString(skillPath).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new ProviderAdapterRequestError({
+                      provider: PROVIDER,
+                      method: "session/prompt",
+                      detail: `Failed to read Cursor skill '${skillPath}'.`,
+                      cause,
+                    }),
+                ),
+              ),
+          });
+          preparedPromptText = renderProviderSkillPrompt(
+            promptText,
+            resolved.documents,
+            resolved.invocations,
+          );
+        }
         // A sendTurn while a prompt is in flight is a steer: the agent folds
         // the new prompt into the ongoing work, so the active turn id is
         // reused instead of opening a new turn.
@@ -967,8 +1008,11 @@ export function makeCursorAdapter(
           }
 
           const promptParts: Array<EffectAcpSchema.ContentBlock> = [];
-          if (input.input?.trim()) {
-            promptParts.push({ type: "text", text: input.input.trim() });
+          if (preparedPromptText) {
+            promptParts.push({
+              type: "text",
+              text: preparedPromptText,
+            });
           }
           if (input.attachments && input.attachments.length > 0) {
             for (const attachment of input.attachments) {

@@ -1,4 +1,9 @@
-import type { EnvironmentId, ProviderInteractionMode, ServerProvider } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  ExplicitSkillInvocation,
+  ProviderInteractionMode,
+  ServerProvider,
+} from "@t3tools/contracts";
 import {
   detectComposerTrigger,
   replaceTextRange,
@@ -39,7 +44,12 @@ export function useComposerCommandMenu({
   readonly selectedProviderStatus: ServerProvider | null;
   readonly hasThread: boolean;
   readonly enabled?: boolean;
-  readonly onChangeDraftMessage: (value: string) => void;
+  // Inserting a skill reports the range it occupies so callers that track
+  // explicit invocations can record it with the same edit.
+  readonly onChangeDraftMessage: (
+    value: string,
+    addedSkillInvocation?: ExplicitSkillInvocation,
+  ) => void;
   readonly onUpdateInteractionMode?: (mode: ProviderInteractionMode) => void;
 }) {
   const [selection, setSelection] = useState(() => composerSelectionAtEnd(draftMessage));
@@ -276,7 +286,16 @@ export function useComposerCommandMenu({
         replacement,
       );
       setSelection({ start: result.cursor, end: result.cursor });
-      onChangeDraftMessage(result.text);
+      onChangeDraftMessage(
+        result.text,
+        item.type === "skill"
+          ? {
+              name: item.skill.name,
+              start: trigger.rangeStart,
+              end: trigger.rangeStart + item.skill.name.length + 1,
+            }
+          : undefined,
+      );
     },
     [draftMessage, onChangeDraftMessage, onUpdateInteractionMode, trigger],
   );

@@ -168,6 +168,77 @@ const cursorAdapterTestLayer = it.layer(
 );
 
 cursorAdapterTestLayer("CursorAdapterLive", (it) => {
+  it.effect("injects selected Cursor skill documents", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CursorAdapter;
+      const settings = yield* ServerSettingsService;
+      const threadId = ThreadId.make("cursor-skill-invocation");
+      const tempDir = yield* Effect.promise(() =>
+        NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "cursor-acp-skill-")),
+      );
+      const workspace = NodePath.join(tempDir, "workspace");
+      const requestLogPath = NodePath.join(tempDir, "requests.ndjson");
+      const skillPath = NodePath.join(workspace, ".cursor", "skills", "deploy", "SKILL.md");
+      const reviewSkillPath = NodePath.join(workspace, ".cursor", "skills", "review", "SKILL.md");
+      yield* Effect.promise(async () => {
+        await NodeFSP.mkdir(NodePath.dirname(skillPath), { recursive: true });
+        await NodeFSP.mkdir(NodePath.dirname(reviewSkillPath), { recursive: true });
+        await NodeFSP.writeFile(
+          skillPath,
+          ["---", "name: deploy", "description: Deploy the service.", "---", "", "# Deploy"].join(
+            "\n",
+          ),
+          "utf8",
+        );
+        await NodeFSP.writeFile(
+          reviewSkillPath,
+          ["---", "name: review", "description: Review the service.", "---", "", "# Review"].join(
+            "\n",
+          ),
+          "utf8",
+        );
+        await NodeFSP.writeFile(requestLogPath, "", "utf8");
+      });
+      const wrapperPath = yield* Effect.promise(() =>
+        makeProbeWrapper(requestLogPath, NodePath.join(tempDir, "argv.txt")),
+      );
+      yield* settings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } });
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("cursor"),
+        cwd: workspace,
+        runtimeMode: "full-access",
+        modelSelection: { instanceId: ProviderInstanceId.make("cursor"), model: "default" },
+      });
+      yield* adapter.sendTurn({
+        threadId,
+        input: "First use $deploy, then $review to ship the release.",
+        skillInvocations: [
+          { name: "deploy", start: 10, end: 17 },
+          { name: "review", start: 24, end: 31 },
+        ],
+        attachments: [],
+      });
+
+      const requests = yield* waitForJsonLogMatch(
+        requestLogPath,
+        (entry) => entry.method === "session/prompt",
+      );
+      const promptRequest = requests.find((entry) => entry.method === "session/prompt");
+      const prompt = (promptRequest?.params as { prompt?: Array<{ text?: string }> } | undefined)
+        ?.prompt?.[0]?.text;
+      assert.include(prompt ?? "", "# Deploy");
+      assert.include(prompt ?? "", "# Review");
+      assert.include(prompt ?? "", "[T3 explicitly invoked skill: deploy]");
+      assert.include(prompt ?? "", "[T3 explicitly invoked skill: review]");
+      assert.notInclude(prompt ?? "", "$deploy");
+      assert.notInclude(prompt ?? "", "$review");
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
   it.effect("starts a session and maps mock ACP prompt flow to runtime events", () =>
     Effect.gen(function* () {
       const adapter = yield* CursorAdapter;

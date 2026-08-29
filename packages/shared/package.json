@@ -175,6 +175,10 @@
       "types": "./src/composerInlineTokens.ts",
       "import": "./src/composerInlineTokens.ts"
     },
+    "./explicitSkillInvocations": {
+      "types": "./src/explicitSkillInvocations.ts",
+      "import": "./src/explicitSkillInvocations.ts"
+    },
     "./terminalLabels": {
       "types": "./src/terminalLabels.ts",
       "import": "./src/terminalLabels.ts"

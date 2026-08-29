@@ -1,10 +1,42 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { assert, it } from "@effect/vitest";
+import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 
-import { discoverClaudeSkills } from "./ClaudeSkills.ts";
+import { discoverClaudeSkills, prepareClaudeSkillContents } from "./ClaudeSkills.ts";
+
+describe("prepareClaudeSkillContents", () => {
+  it("expands full and positional arguments", () => {
+    assert.deepEqual(
+      prepareClaudeSkillContents(
+        ["---", "name: migrate", "---", "", "Move $0 from $1. Full: $ARGUMENTS"].join("\n"),
+        'Button "old folder"',
+      ),
+      {
+        kind: "prepared",
+        contents: 'Move Button from old folder. Full: Button "old folder"',
+      },
+    );
+  });
+
+  it("appends arguments when the body has no placeholder", () => {
+    assert.deepEqual(prepareClaudeSkillContents("# Review", "this change"), {
+      kind: "prepared",
+      contents: "# Review\n\nARGUMENTS: this change",
+    });
+  });
+
+  it("rejects runtime fields the fallback cannot preserve", () => {
+    assert.deepEqual(
+      prepareClaudeSkillContents(
+        ["---", "name: review", "context: fork", "allowed-tools: Read", "---", "Review"].join("\n"),
+        "this change",
+      ),
+      { kind: "unsupported", fields: ["allowed-tools", "context"] },
+    );
+  });
+});
 
 const writeSkill = Effect.fn(function* (
   skillsDir: string,
@@ -63,6 +95,29 @@ it.layer(NodeServices.layer)("discoverClaudeSkills", (it) => {
           description: "Deploy the app.",
         },
       ]);
+    }),
+  );
+
+  it.effect("hides skills disabled for user invocation", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-skills-" });
+      const configDir = path.join(tempDir, "claude-home");
+
+      yield* writeSkill(
+        path.join(configDir, "skills"),
+        "model-only",
+        [
+          "---",
+          "name: model-only",
+          "description: Not available in the composer.",
+          "user-invocable: false",
+          "---",
+        ].join("\n"),
+      );
+
+      assert.deepEqual(yield* discoverClaudeSkills({ homePath: configDir }), []);
     }),
   );
 

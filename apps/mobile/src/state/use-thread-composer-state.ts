@@ -5,6 +5,7 @@ import * as Cause from "effect/Cause";
 
 import {
   CommandId,
+  type ExplicitSkillInvocation,
   MessageId,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   type EnvironmentId,
@@ -22,6 +23,7 @@ import {
 } from "@t3tools/client-runtime/state/threads";
 import { isAtomCommandInterrupted } from "@t3tools/client-runtime/state/runtime";
 import { deriveActiveWorkStartedAt } from "@t3tools/shared/orchestrationTiming";
+import { remapExplicitSkillInvocations } from "@t3tools/shared/explicitSkillInvocations";
 
 import { makeQueuedMessageMetadata } from "../lib/commandMetadata";
 import {
@@ -91,6 +93,7 @@ export function useThreadDraftForThread(input: {
 
   return {
     draftMessage: draft.text,
+    draftSkillInvocations: draft.skillInvocations ?? [],
     draftAttachments: draft.attachments,
   };
 }
@@ -136,6 +139,7 @@ export function useThreadComposerState() {
 
   const selectedDraft = selectedThreadKey ? composerDrafts[selectedThreadKey] : null;
   const draftMessage = selectedDraft?.text ?? "";
+  const draftSkillInvocations = selectedDraft?.skillInvocations ?? [];
   const draftAttachments = selectedDraft?.attachments ?? [];
   const selectedThreadQueueCount = selectedThreadQueuedMessages.length;
   const selectedThread = selectedThreadDetail ?? selectedThreadShell;
@@ -177,6 +181,11 @@ export function useThreadComposerState() {
     const draft = getComposerDraftSnapshot(threadKey);
     const thread = selectedThreadDetail ?? selectedThreadShell;
     const text = draft.text.trim();
+    const sentSkillInvocations = remapExplicitSkillInvocations({
+      sourceText: draft.text,
+      outgoingText: text,
+      invocations: draft.skillInvocations ?? [],
+    });
     const attachments = draft.attachments;
     if (text.length === 0 && attachments.length === 0) {
       return null;
@@ -270,6 +279,7 @@ export function useThreadComposerState() {
       messageId,
       commandId: CommandId.make(metadata.commandId),
       text,
+      ...(sentSkillInvocations.length > 0 ? { skillInvocations: sentSkillInvocations } : {}),
       attachments,
       modelSelection: draft.modelSelection ?? thread.modelSelection,
       runtimeMode: draft.runtimeMode ?? thread.runtimeMode,
@@ -289,7 +299,11 @@ export function useThreadComposerState() {
         // append: the merge path slots existing attachments first and truncates
         // at the send limit, which would silently drop this message's images if
         // the user attached new ones while the write was in flight.
-        void mergeComposerDraftContent(threadKey, { text, attachments: [] });
+        void mergeComposerDraftContent(threadKey, {
+          text,
+          skillInvocations: sentSkillInvocations,
+          attachments: [],
+        });
         appendComposerDraftAttachments(threadKey, attachments, { allowOverflow: true });
         setPendingConnectionError(
           error instanceof Error ? error.message : "Failed to save the queued message.",
@@ -305,13 +319,13 @@ export function useThreadComposerState() {
   ]);
 
   const onChangeDraftMessage = useCallback(
-    (value: string) => {
+    (value: string, skillInvocations: ReadonlyArray<ExplicitSkillInvocation>) => {
       if (!selectedThreadShell) {
         return;
       }
 
       const threadKey = scopedThreadKey(selectedThreadShell.environmentId, selectedThreadShell.id);
-      setComposerDraftText(threadKey, value);
+      setComposerDraftText(threadKey, value, skillInvocations);
     },
     [selectedThreadShell],
   );
@@ -470,6 +484,7 @@ export function useThreadComposerState() {
     selectedThreadQueueCount,
     activeWorkStartedAt,
     draftMessage,
+    draftSkillInvocations,
     draftAttachments,
     modelSelection,
     runtimeMode,

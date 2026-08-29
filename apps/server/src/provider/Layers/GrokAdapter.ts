@@ -5,6 +5,7 @@ import {
   type ProviderApprovalDecision,
   type ProviderRuntimeEvent,
   type ProviderSession,
+  type ServerProviderSkill,
   type ProviderUserInputAnswers,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -59,6 +60,7 @@ import {
 } from "../acp/AcpCoreRuntimeEvents.ts";
 import { parsePermissionRequest } from "../acp/AcpRuntimeModel.ts";
 import { makeAcpNativeLoggerFactory } from "../acp/AcpNativeLogging.ts";
+import { discoverGrokSkills } from "../Drivers/GrokSkills.ts";
 import {
   applyGrokAcpModelSelection,
   currentGrokModelIdFromSessionSetup,
@@ -80,6 +82,7 @@ import {
 } from "../acp/XAiAcpExtension.ts";
 import { type GrokAdapterShape } from "../Services/GrokAdapter.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
+import { renderProviderSkillPrompt, loadInvokedSkills } from "../skillInvocations.ts";
 
 const encodeUnknownJsonStringExit = Schema.encodeUnknownExit(Schema.fromJsonString(Schema.Unknown));
 
@@ -131,6 +134,7 @@ interface GrokSessionContext {
   readonly threadId: ThreadId;
   readonly acpSessionId: string;
   session: ProviderSession;
+  readonly skills: ReadonlyArray<ServerProviderSkill>;
   readonly scope: Scope.Closeable;
   readonly acp: AcpSessionRuntime.AcpSessionRuntime["Service"];
   notificationFiber: Fiber.Fiber<void, never> | undefined;
@@ -370,6 +374,10 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
         : DEFAULT_GROK_ACTIVE_TOOL_INACTIVITY_TIMEOUT_MS;
     const activeToolInactivityTimeoutNanos =
       BigInt(activeToolInactivityTimeoutMs) * NANOS_PER_MILLI;
+    const discoverSkills = (cwd?: string) =>
+      discoverGrokSkills(grokSettings, options?.environment ?? hostEnvironment, cwd).pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner),
+      );
 
     const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
     const randomUUIDv4 = crypto.randomUUIDv4.pipe(
@@ -955,6 +963,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
           }
 
           const cwd = path.resolve(input.cwd.trim());
+          const skills = yield* discoverSkills(cwd);
           const grokModelSelection =
             input.modelSelection?.instanceId === boundInstanceId ? input.modelSelection : undefined;
           const existing = sessions.get(input.threadId);
@@ -1266,6 +1275,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             threadId: input.threadId,
             acpSessionId: started.sessionId,
             session,
+            skills,
             scope: sessionScope,
             acp,
             notificationFiber: undefined,
@@ -1504,6 +1514,33 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
               );
 
               const text = input.input?.trim();
+              let promptText = text;
+              if (text && input.skillInvocations && input.skillInvocations.length > 0) {
+                const resolved = yield* loadInvokedSkills({
+                  provider: PROVIDER,
+                  providerLabel: "Grok",
+                  prompt: text,
+                  invocations: input.skillInvocations,
+                  skills: ctx.skills,
+                  readFile: (skillPath) =>
+                    fileSystem.readFileString(skillPath).pipe(
+                      Effect.mapError(
+                        (cause) =>
+                          new ProviderAdapterRequestError({
+                            provider: PROVIDER,
+                            method: "session/prompt",
+                            detail: `Failed to read Grok skill '${skillPath}'.`,
+                            cause,
+                          }),
+                      ),
+                    ),
+                });
+                promptText = renderProviderSkillPrompt(
+                  text,
+                  resolved.documents,
+                  resolved.invocations,
+                );
+              }
               // Grok ingests images only. Generic files reach the agent
               // through the path line ProviderService puts in the prompt.
               const imagePromptParts = yield* Effect.forEach(
@@ -1540,7 +1577,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                   }),
               );
               const promptParts: Array<EffectAcpSchema.ContentBlock> = [
-                ...(text ? [{ type: "text" as const, text }] : []),
+                ...(promptText ? [{ type: "text" as const, text: promptText }] : []),
                 ...imagePromptParts,
               ];
 

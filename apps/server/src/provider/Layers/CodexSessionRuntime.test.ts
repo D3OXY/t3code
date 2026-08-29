@@ -17,6 +17,7 @@ import {
 import { codexSessionAppServerArgs } from "./codexLaunchArgs.ts";
 import {
   buildTurnStartParams,
+  CodexSessionRuntimeUnknownSkillError,
   describeMcpElicitation,
   hasConfiguredMcpServer,
   isRecoverableThreadResumeError,
@@ -25,6 +26,8 @@ import {
   toMcpElicitationResponse,
 } from "./CodexSessionRuntime.ts";
 const isCodexAppServerRequestError = Schema.is(CodexErrors.CodexAppServerRequestError);
+const isCodexAppServerProtocolParseError = Schema.is(CodexErrors.CodexAppServerProtocolParseError);
+const isCodexSessionRuntimeUnknownSkillError = Schema.is(CodexSessionRuntimeUnknownSkillError);
 
 describe("CodexSessionRuntimeIdentifierGenerationError", () => {
   it("retains identifier purpose and the random source failure", () => {
@@ -81,6 +84,10 @@ describe("buildTurnStartParams", () => {
         ],
       }).pipe(Effect.flip),
     );
+    if (!isCodexAppServerProtocolParseError(error)) {
+      NodeAssert.fail("expected CodexAppServerProtocolParseError");
+      return;
+    }
     const { cause, ...directDiagnostics } = error;
 
     NodeAssert.equal(error.operation, "decode-request-payload");
@@ -221,6 +228,85 @@ describe("buildTurnStartParams", () => {
           },
         ],
       });
+    }),
+  );
+
+  it.effect("attaches explicit $skill tokens as Codex skill user input", () =>
+    Effect.gen(function* () {
+      const params = yield* buildTurnStartParams({
+        threadId: "provider-thread-1",
+        runtimeMode: "full-access",
+        prompt: "$grill-with-docs explain why this skill is not in the list",
+        skillInvocations: [{ name: "grill-with-docs", start: 0, end: 16 }],
+        availableSkills: [
+          {
+            name: "grill-with-docs",
+            path: "/Users/me/.agents/skills/grill-with-docs/SKILL.md",
+            enabled: true,
+          },
+        ],
+      });
+
+      NodeAssert.deepStrictEqual(params.input, [
+        {
+          type: "text",
+          text: "[T3 explicitly invoked skill: grill-with-docs] explain why this skill is not in the list",
+        },
+        {
+          type: "skill",
+          name: "grill-with-docs",
+          path: "/Users/me/.agents/skills/grill-with-docs/SKILL.md",
+        },
+      ]);
+    }),
+  );
+
+  it.effect("fails instead of sending an unknown $skill token", () =>
+    Effect.gen(function* () {
+      const error = yield* buildTurnStartParams({
+        threadId: "provider-thread-1",
+        runtimeMode: "full-access",
+        prompt: "$missing-skill do this",
+        skillInvocations: [{ name: "missing-skill", start: 0, end: 14 }],
+        availableSkills: [
+          {
+            name: "grill-with-docs",
+            path: "/Users/me/.agents/skills/grill-with-docs/SKILL.md",
+            enabled: true,
+          },
+        ],
+      }).pipe(Effect.flip);
+
+      if (!isCodexSessionRuntimeUnknownSkillError(error)) {
+        NodeAssert.fail("expected CodexSessionRuntimeUnknownSkillError");
+        return;
+      }
+      NodeAssert.deepStrictEqual(error.names, ["missing-skill"]);
+      NodeAssert.equal(error.message, "Unknown Codex skill $missing-skill.");
+    }),
+  );
+
+  it.effect("leaves a message without $skill tokens unchanged", () =>
+    Effect.gen(function* () {
+      const params = yield* buildTurnStartParams({
+        threadId: "provider-thread-1",
+        runtimeMode: "full-access",
+        prompt: "Review this change",
+        availableSkills: [
+          {
+            name: "grill-with-docs",
+            path: "/Users/me/.agents/skills/grill-with-docs/SKILL.md",
+            enabled: true,
+          },
+        ],
+      });
+
+      NodeAssert.deepStrictEqual(params.input, [
+        {
+          type: "text",
+          text: "Review this change",
+        },
+      ]);
     }),
   );
 

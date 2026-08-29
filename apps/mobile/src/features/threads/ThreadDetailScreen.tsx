@@ -10,6 +10,7 @@ import { HeaderHeightContext } from "@react-navigation/elements";
 import type {
   ApprovalRequestId,
   EnvironmentId,
+  ExplicitSkillInvocation,
   MessageId,
   ModelSelection,
   OrchestrationThreadShell,
@@ -20,6 +21,7 @@ import type {
   ThreadId,
   UserInputQuestion,
 } from "@t3tools/contracts";
+import { updateExplicitSkillInvocationsForTextEdit } from "@t3tools/shared/explicitSkillInvocations";
 import * as Haptics from "expo-haptics";
 import {
   memo,
@@ -105,6 +107,7 @@ export interface ThreadDetailScreenProps {
   readonly activePendingUserInputAnswers: Record<string, string | ReadonlyArray<string>> | null;
   readonly respondingUserInputId: ApprovalRequestId | null;
   readonly draftMessage: string;
+  readonly draftSkillInvocations: ReadonlyArray<ExplicitSkillInvocation>;
   readonly draftAttachments: ReadonlyArray<DraftComposerAttachment>;
   readonly connectionStateLabel: EnvironmentConnectionPhase;
   /** Message sync status for the selected thread (drives the composer status pill). */
@@ -120,7 +123,10 @@ export interface ThreadDetailScreenProps {
   readonly usesAutomaticContentInsets?: boolean;
   readonly onHeaderMaterialVisibilityChange?: (visible: boolean) => void;
   readonly onOpenConnectionEditor: () => void;
-  readonly onChangeDraftMessage: (value: string) => void;
+  readonly onChangeDraftMessage: (
+    value: string,
+    skillInvocations: ReadonlyArray<ExplicitSkillInvocation>,
+  ) => void;
   readonly onPickDraftMedia: () => Promise<void>;
   readonly onPickDraftFiles: () => Promise<void>;
   readonly onNativePasteImages: (uris: ReadonlyArray<string>) => Promise<void>;
@@ -626,14 +632,21 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
       const nextDraft = appendCodexArtifactTemplateUsePrompt(currentDraft, template);
       if (nextDraft !== currentDraft) {
         draftMessageRef.current = nextDraft;
-        props.onChangeDraftMessage(nextDraft);
+        props.onChangeDraftMessage(
+          nextDraft,
+          updateExplicitSkillInvocationsForTextEdit({
+            previousText: currentDraft,
+            nextText: nextDraft,
+            invocations: props.draftSkillInvocations,
+          }),
+        );
       }
       requestAnimationFrame(() => {
         composerEditorRef.current?.focus();
         composerEditorRef.current?.setSelection({ start: nextDraft.length, end: nextDraft.length });
       });
     },
-    [props.onChangeDraftMessage],
+    [props.draftSkillInvocations, props.onChangeDraftMessage],
   );
 
   const handleScrollToEnd = useCallback(() => {
@@ -798,6 +811,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                 <ThreadComposer
                   editorRef={composerEditorRef}
                   draftMessage={props.draftMessage}
+                  draftSkillInvocations={props.draftSkillInvocations}
                   draftAttachments={props.draftAttachments}
                   placeholder="Ask the repo agent, or run a command…"
                   contentMaxWidth={contentMaxWidth}

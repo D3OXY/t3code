@@ -38,15 +38,22 @@ const decodeGrokSettings = Schema.decodeSync(GrokSettings);
 const __dirname = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
 const mockAgentPath = NodePath.join(__dirname, "../../../scripts/acp-mock-agent.ts");
 const mockAgentCommand = process.execPath;
+const encodeInspectJson = Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown));
 
-async function makeMockGrokWrapper(extraEnv?: Record<string, string>) {
+async function makeMockGrokWrapper(extraEnv?: Record<string, string>, inspectJson?: string) {
   const dir = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "grok-acp-mock-"));
   const wrapperPath = NodePath.join(dir, "fake-grok.sh");
   const envExports = Object.entries(extraEnv ?? {})
     .map(([key, value]) => `export ${key}=${JSON.stringify(value)}`)
     .join("\n");
+  const inspectBranch = `export T3_GROK_INSPECT_JSON=${JSON.stringify(inspectJson ?? '{"skills":[]}')}
+if [ "$1" = "inspect" ] && [ "$2" = "--json" ]; then
+  printf '%s\\n' "$T3_GROK_INSPECT_JSON"
+  exit 0
+fi`;
   const script = `#!/bin/sh
 ${envExports}
+${inspectBranch}
 exec ${JSON.stringify(mockAgentCommand)} ${JSON.stringify(mockAgentPath)} "$@"
 `;
   await NodeFSP.writeFile(wrapperPath, script, "utf8");
@@ -273,6 +280,61 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
       if (delta?.type === "content.delta") {
         assert.equal(delta.payload.delta, "hello from mock");
       }
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("injects explicitly selected skills into Grok ACP prompts", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("grok-skill-invocation");
+      const tempDir = yield* Effect.promise(() =>
+        NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "grok-acp-skill-")),
+      );
+      const workspace = NodePath.join(tempDir, "workspace");
+      const requestLogPath = NodePath.join(tempDir, "requests.ndjson");
+      const skillPath = NodePath.join(workspace, ".agents", "skills", "review", "SKILL.md");
+      const inspectJson = yield* encodeInspectJson({
+        skills: [
+          {
+            name: "review",
+            description: "Review the change.",
+            source: { type: "project", path: skillPath },
+            userInvocable: true,
+          },
+        ],
+      });
+      yield* Effect.promise(async () => {
+        await NodeFSP.mkdir(NodePath.dirname(skillPath), { recursive: true });
+        await NodeFSP.writeFile(
+          skillPath,
+          "---\nname: review\ndescription: Review the change.\n---\n\n# Review checklist",
+          "utf8",
+        );
+        await NodeFSP.writeFile(requestLogPath, "", "utf8");
+      });
+      const wrapperPath = yield* Effect.promise(() =>
+        makeMockGrokWrapper({ T3_ACP_REQUEST_LOG_PATH: requestLogPath }, inspectJson),
+      );
+      const adapter = yield* makeTestAdapter(wrapperPath);
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("grok"),
+        cwd: workspace,
+        runtimeMode: "full-access",
+        modelSelection: { instanceId: ProviderInstanceId.make("grok"), model: "grok-build" },
+      });
+      yield* adapter.sendTurn({
+        threadId,
+        input: "Use $review to inspect this change.",
+        skillInvocations: [{ name: "review", start: 4, end: 11 }],
+        attachments: [],
+      });
+
+      const requests = yield* waitForFileContent(requestLogPath, 40, "# Review checklist");
+      assert.include(requests, "# Review checklist");
+      assert.notInclude(requests, "$review");
 
       yield* adapter.stopSession(threadId);
     }),

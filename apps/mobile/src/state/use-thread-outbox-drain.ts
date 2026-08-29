@@ -709,6 +709,9 @@ export function useThreadOutboxDrain(): void {
             role: "user",
             text: queuedMessage.text,
             attachments: prepared.attachments,
+            ...(queuedMessage.skillInvocations !== undefined
+              ? { skillInvocations: queuedMessage.skillInvocations }
+              : {}),
           },
           modelSelection: settings.modelSelection,
           runtimeMode: settings.runtimeMode,

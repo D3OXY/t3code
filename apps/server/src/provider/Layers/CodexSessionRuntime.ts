@@ -9,6 +9,7 @@ import {
   type ProviderApprovalOption,
   type ProviderEvent,
   type ProviderInteractionMode,
+  type ExplicitSkillInvocation,
   type ProviderRequestKind,
   type ProviderSession,
   type ProviderTurnStartResult,
@@ -17,8 +18,8 @@ import {
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
-import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import { normalizeModelSlug } from "@t3tools/shared/model";
+import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
@@ -36,7 +37,9 @@ import * as CodexErrors from "effect-codex-app-server/errors";
 import * as CodexRpc from "effect-codex-app-server/rpc";
 import * as EffectCodexSchema from "effect-codex-app-server/schema";
 
-import { buildCodexInitializeParams } from "./CodexProvider.ts";
+import { buildCodexInitializeParams, parseCodexSkillsListResponse } from "./CodexProvider.ts";
+import { bindCodexSkillInvocations } from "./codexSkillInvocations.ts";
+import { replaceExplicitSkillInvocations } from "../skillInvocations.ts";
 import { codexSessionAppServerArgs } from "./codexLaunchArgs.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
 import { buildCodexDeveloperInstructions } from "../CodexDeveloperInstructions.ts";
@@ -170,6 +173,7 @@ export interface CodexSessionRuntimeOptions {
 
 export interface CodexSessionRuntimeSendTurnInput {
   readonly input?: string;
+  readonly skillInvocations?: ReadonlyArray<ExplicitSkillInvocation>;
   readonly attachments?: ReadonlyArray<{
     readonly type: "image";
     readonly url: string;
@@ -221,7 +225,8 @@ export type CodexSessionRuntimeError =
   | CodexSessionRuntimePendingApprovalNotFoundError
   | CodexSessionRuntimePendingUserInputNotFoundError
   | CodexSessionRuntimeInvalidUserInputAnswersError
-  | CodexSessionRuntimeThreadIdMissingError;
+  | CodexSessionRuntimeThreadIdMissingError
+  | CodexSessionRuntimeUnknownSkillError;
 
 export class CodexSessionRuntimePendingApprovalNotFoundError extends Schema.TaggedErrorClass<CodexSessionRuntimePendingApprovalNotFoundError>()(
   "CodexSessionRuntimePendingApprovalNotFoundError",
@@ -264,6 +269,21 @@ export class CodexSessionRuntimeThreadIdMissingError extends Schema.TaggedErrorC
 ) {
   override get message(): string {
     return `Codex session is missing a provider thread id for ${this.threadId}`;
+  }
+}
+
+export class CodexSessionRuntimeUnknownSkillError extends Schema.TaggedErrorClass<CodexSessionRuntimeUnknownSkillError>()(
+  "CodexSessionRuntimeUnknownSkillError",
+  {
+    names: Schema.Array(Schema.String),
+  },
+) {
+  override get message(): string {
+    const listed = this.names.map((name) => `$${name}`).join(", ");
+    if (this.names.length === 1) {
+      return `Unknown Codex skill ${listed}.`;
+    }
+    return `Unknown Codex skills ${listed}.`;
   }
 }
 
@@ -593,9 +613,15 @@ export function buildTurnStartParams(input: {
   readonly threadId: string;
   readonly runtimeMode: RuntimeMode;
   readonly prompt?: string;
+  readonly skillInvocations?: ReadonlyArray<ExplicitSkillInvocation>;
   readonly attachments?: ReadonlyArray<{
     readonly type: "image";
     readonly url: string;
+  }>;
+  readonly availableSkills?: ReadonlyArray<{
+    readonly name: string;
+    readonly path: string;
+    readonly enabled: boolean;
   }>;
   readonly model?: string;
   readonly serviceTier?: CodexServiceTier;
@@ -605,14 +631,33 @@ export function buildTurnStartParams(input: {
   readonly browserToolsAvailable?: boolean;
 }): Effect.Effect<
   CodexTurnStartParamsWithCollaborationMode,
-  CodexErrors.CodexAppServerProtocolParseError
+  CodexErrors.CodexAppServerProtocolParseError | CodexSessionRuntimeUnknownSkillError
 > {
+  const boundSkills = bindCodexSkillInvocations(
+    input.prompt ?? "",
+    input.skillInvocations ?? [],
+    input.availableSkills ?? [],
+  );
+  if (!boundSkills.ok) {
+    return Effect.fail(new CodexSessionRuntimeUnknownSkillError({ names: boundSkills.names }));
+  }
+
   const turnInput: Array<EffectCodexSchema.V2TurnStartParams__UserInput> = [];
-  if (input.prompt) {
+  const prompt = input.prompt
+    ? replaceExplicitSkillInvocations(
+        input.prompt,
+        input.skillInvocations ?? [],
+        (name) => `[T3 explicitly invoked skill: ${name}]`,
+      )
+    : undefined;
+  if (prompt) {
     turnInput.push({
       type: "text",
-      text: input.prompt,
+      text: prompt,
     });
+  }
+  for (const skill of boundSkills.inputs) {
+    turnInput.push(skill);
   }
   for (const attachment of input.attachments ?? []) {
     turnInput.push(attachment);
@@ -2308,11 +2353,21 @@ export const makeCodexSessionRuntime = (
           const normalizedModel = normalizeCodexModelSlug(
             input.model ?? (yield* Ref.get(sessionRef)).model,
           );
+          const skillInvocations = input.skillInvocations ?? [];
+          let availableSkills: ReturnType<typeof parseCodexSkillsListResponse> = [];
+          if (skillInvocations.length > 0) {
+            const session = yield* Ref.get(sessionRef);
+            const cwd = session.cwd ?? options.cwd;
+            const skillsResponse = yield* client.request("skills/list", { cwds: [cwd] });
+            availableSkills = parseCodexSkillsListResponse(skillsResponse, cwd);
+          }
           const params = yield* buildTurnStartParams({
             threadId: providerThreadId,
             runtimeMode: options.runtimeMode,
             ...(input.input ? { prompt: input.input } : {}),
+            ...(skillInvocations.length > 0 ? { skillInvocations } : {}),
             ...(input.attachments ? { attachments: input.attachments } : {}),
+            ...(skillInvocations.length > 0 ? { availableSkills } : {}),
             ...(normalizedModel ? { model: normalizedModel } : {}),
             ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
             ...(input.effort ? { effort: input.effort } : {}),

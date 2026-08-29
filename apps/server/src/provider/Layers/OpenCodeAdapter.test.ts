@@ -74,6 +74,8 @@ const runtimeMock = {
     messageCalls: [] as Array<{ sessionID: string; messageID: string }>,
     messageFailures: 0,
     promptCalls: [] as Array<unknown>,
+    skillCalls: [] as Array<{ directory?: string }>,
+    skills: [] as Array<{ name: string; location: string; content: string }>,
     promptAsyncError: null as Error | null,
     promptAsyncImplementation: null as (() => Promise<void>) | null,
     autoPromptEcho: true,
@@ -121,6 +123,8 @@ const runtimeMock = {
     this.state.messageCalls.length = 0;
     this.state.messageFailures = 0;
     this.state.promptCalls.length = 0;
+    this.state.skillCalls.length = 0;
+    this.state.skills = [];
     this.state.promptAsyncError = null;
     this.state.promptAsyncImplementation = null;
     this.state.autoPromptEcho = true;
@@ -329,6 +333,12 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
             targetIndex >= 0
               ? runtimeMock.state.messages.slice(0, targetIndex + 1)
               : runtimeMock.state.messages;
+        },
+      },
+      app: {
+        skills: async (input?: { directory?: string }) => {
+          runtimeMock.state.skillCalls.push(input?.directory ? { directory: input.directory } : {});
+          return { data: runtimeMock.state.skills };
         },
       },
       event: {
@@ -926,6 +936,45 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
         schemaVersion: 1,
         sessionId: "ses_persisted",
       });
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("injects explicitly selected skills into OpenCode prompts", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-opencode-skill");
+      runtimeMock.state.skills = [
+        {
+          name: "review",
+          location: "/workspace/.agents/skills/review/SKILL.md",
+          content: "---\nname: review\n---\n\n# Review checklist",
+        },
+      ];
+
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        cwd: "/workspace",
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({
+        threadId,
+        input: "Use $review to inspect this change.",
+        skillInvocations: [{ name: "review", start: 4, end: 11 }],
+        modelSelection: createModelSelection(ProviderInstanceId.make("opencode"), "openai/gpt-5"),
+      });
+
+      const prompt = runtimeMock.state.promptCalls.at(-1) as {
+        parts?: Array<{ type?: string; text?: string }>;
+      };
+      const promptText = prompt.parts?.find((part) => part.type === "text")?.text ?? "";
+      NodeAssert.equal(runtimeMock.state.skillCalls.length, 1);
+      NodeAssert.equal(runtimeMock.state.skillCalls[0]?.directory, "/workspace");
+      NodeAssert.equal(promptText.includes("# Review checklist"), true);
+      NodeAssert.equal(promptText.includes("[T3 explicitly invoked skill: review]"), true);
+      NodeAssert.equal(promptText.includes("$review"), false);
 
       yield* adapter.stopSession(threadId);
     }),

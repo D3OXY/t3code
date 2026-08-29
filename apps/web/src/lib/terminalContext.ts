@@ -189,10 +189,43 @@ export function materializeInlineTerminalContextPrompt(
     lineEnd: number;
   }>,
 ): string {
+  return materializeInlineTerminalContextPromptWithRanges(prompt, contexts, []).prompt;
+}
+
+interface PromptRange {
+  readonly start: number;
+  readonly end: number;
+}
+
+function materializeInlineTerminalContextPromptWithRanges<T extends PromptRange>(
+  prompt: string,
+  contexts: ReadonlyArray<{
+    terminalLabel: string;
+    lineStart: number;
+    lineEnd: number;
+  }>,
+  ranges: ReadonlyArray<T>,
+): { prompt: string; ranges: T[] } {
+  const validRanges = ranges.filter(
+    (range) =>
+      Number.isInteger(range.start) &&
+      Number.isInteger(range.end) &&
+      range.start >= 0 &&
+      range.end >= range.start &&
+      range.end <= prompt.length,
+  );
+  const boundaries = new Set(validRanges.flatMap((range) => [range.start, range.end]));
+  const outputOffsets = new Map<number, number>();
   let nextContextIndex = 0;
   let result = "";
 
-  for (const char of prompt) {
+  for (let index = 0; index <= prompt.length; index += 1) {
+    if (boundaries.has(index)) {
+      outputOffsets.set(index, result.length);
+    }
+    if (index === prompt.length) break;
+
+    const char = prompt[index]!;
     if (char !== INLINE_TERMINAL_CONTEXT_PLACEHOLDER) {
       result += char;
       continue;
@@ -205,19 +238,44 @@ export function materializeInlineTerminalContextPrompt(
     result += formatInlineTerminalContextLabel(context);
   }
 
-  return result;
+  return {
+    prompt: result,
+    ranges: validRanges.map((range) => ({
+      ...range,
+      start: outputOffsets.get(range.start)!,
+      end: outputOffsets.get(range.end)!,
+    })),
+  };
+}
+
+export function appendTerminalContextsToPromptWithRanges<T extends PromptRange>(
+  prompt: string,
+  contexts: ReadonlyArray<TerminalContextSelection>,
+  ranges: ReadonlyArray<T>,
+): { prompt: string; ranges: T[] } {
+  const materialized = materializeInlineTerminalContextPromptWithRanges(prompt, contexts, ranges);
+  const leadingTrim = materialized.prompt.length - materialized.prompt.trimStart().length;
+  const trimmedPrompt = materialized.prompt.trim();
+  const trimmedRanges = materialized.ranges.flatMap((range) => {
+    const start = range.start - leadingTrim;
+    const end = range.end - leadingTrim;
+    return start < 0 || end > trimmedPrompt.length ? [] : [{ ...range, start, end }];
+  });
+  const contextBlock = buildTerminalContextBlock(contexts);
+  if (contextBlock.length === 0) {
+    return { prompt: trimmedPrompt, ranges: trimmedRanges };
+  }
+  return {
+    prompt: trimmedPrompt.length > 0 ? `${trimmedPrompt}\n\n${contextBlock}` : contextBlock,
+    ranges: trimmedRanges,
+  };
 }
 
 export function appendTerminalContextsToPrompt(
   prompt: string,
   contexts: ReadonlyArray<TerminalContextSelection>,
 ): string {
-  const trimmedPrompt = materializeInlineTerminalContextPrompt(prompt, contexts).trim();
-  const contextBlock = buildTerminalContextBlock(contexts);
-  if (contextBlock.length === 0) {
-    return trimmedPrompt;
-  }
-  return trimmedPrompt.length > 0 ? `${trimmedPrompt}\n\n${contextBlock}` : contextBlock;
+  return appendTerminalContextsToPromptWithRanges(prompt, contexts, []).prompt;
 }
 
 export function extractTrailingTerminalContexts(prompt: string): ExtractedTerminalContexts {

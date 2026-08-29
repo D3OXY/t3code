@@ -1,5 +1,6 @@
 import {
   EventId,
+  type ProviderSendTurnInput,
   type OpenCodeSettings,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -55,6 +56,7 @@ import {
   toOpenCodeQuestionAnswers,
   type OpenCodeServerConnection,
 } from "../opencodeRuntime.ts";
+import { renderProviderSkillPrompt, loadInvokedSkills } from "../skillInvocations.ts";
 import * as Option from "effect/Option";
 
 const PROVIDER = ProviderDriverKind.make("opencode");
@@ -318,8 +320,15 @@ function isOpenCodeDefaultTitle(title: string): boolean {
   return OPENCODE_DEFAULT_TITLE_PATTERN.test(title);
 }
 
+interface OpenCodeSkillSnapshot {
+  readonly name: string;
+  readonly location: string;
+  readonly content: string;
+}
+
 interface OpenCodeSessionContext {
   session: ProviderSession;
+  readonly skills: ReadonlyArray<OpenCodeSkillSnapshot>;
   readonly client: OpencodeClient;
   readonly server: OpenCodeServerConnection;
   readonly directory: string;
@@ -820,6 +829,31 @@ export function makeOpenCodeAdapter(
       }
       return current;
     });
+    const prepareSkillPrompt = (
+      context: OpenCodeSessionContext,
+      text: string | undefined,
+      invocations: ProviderSendTurnInput["skillInvocations"],
+    ) =>
+      Effect.gen(function* () {
+        if (!text || !invocations || invocations.length === 0) {
+          return text;
+        }
+
+        const skillsByPath = new Map(context.skills.map((skill) => [skill.location, skill]));
+        const resolved = yield* loadInvokedSkills({
+          provider: PROVIDER,
+          providerLabel: "OpenCode",
+          prompt: text,
+          invocations,
+          skills: context.skills.map((skill) => ({
+            name: skill.name,
+            path: skill.location,
+            enabled: true,
+          })),
+          readFile: (skillPath) => Effect.succeed(skillsByPath.get(skillPath)?.content ?? ""),
+        });
+        return renderProviderSkillPrompt(text, resolved.documents, resolved.invocations);
+      });
     const randomUUIDv4 = crypto.randomUUIDv4.pipe(
       Effect.mapError(
         (cause) =>
@@ -2435,6 +2469,10 @@ export function makeOpenCodeAdapter(
         });
 
         const createdAt = yield* nowIso;
+        const skillResponse = yield* runOpenCodeSdk("app.skills", () =>
+          started.client.app.skills({ directory }),
+        ).pipe(Effect.mapError(toRequestError));
+        const skills = (skillResponse.data ?? []) satisfies ReadonlyArray<OpenCodeSkillSnapshot>;
         const session: ProviderSession = {
           provider: PROVIDER,
           providerInstanceId: boundInstanceId,
@@ -2456,6 +2494,7 @@ export function makeOpenCodeAdapter(
 
         const context: OpenCodeSessionContext = {
           session,
+          skills,
           client: started.client,
           server: started.server,
           directory,
@@ -2586,6 +2625,7 @@ export function makeOpenCodeAdapter(
           issue: "OpenCode turns require text input or at least one attachment.",
         });
       }
+      const promptText = yield* prepareSkillPrompt(context, text, input.skillInvocations);
 
       return yield* context.promptSemaphore.withPermit(
         Effect.gen(function* () {
@@ -2692,7 +2732,10 @@ export function makeOpenCodeAdapter(
                 model: parsedModel,
                 ...(context.activeAgent ? { agent: context.activeAgent } : {}),
                 ...(context.activeVariant ? { variant: context.activeVariant } : {}),
-                parts: [...(text ? [{ type: "text" as const, text }] : []), ...fileParts],
+                parts: [
+                  ...(promptText ? [{ type: "text" as const, text: promptText }] : []),
+                  ...fileParts,
+                ],
               },
               { signal },
             ),

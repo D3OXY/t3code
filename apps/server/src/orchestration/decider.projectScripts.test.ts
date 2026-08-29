@@ -307,8 +307,9 @@ it.layer(NodeServices.layer)("decider project scripts", (it) => {
           message: {
             messageId: asMessageId("message-user-1"),
             role: "user",
-            text: "hello",
+            text: "hello $review",
             attachments: [],
+            skillInvocations: [{ name: "review", start: 6, end: 13 }],
           },
           modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.3-codex", [
             { id: "reasoningEffort", value: "high" },
@@ -334,12 +335,14 @@ it.layer(NodeServices.layer)("decider project scripts", (it) => {
       expect(turnStartEvent.payload).toMatchObject({
         threadId: ThreadId.make("thread-1"),
         messageId: asMessageId("message-user-1"),
+        skillInvocations: [{ name: "review", start: 6, end: 13 }],
         modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.3-codex", [
           { id: "reasoningEffort", value: "high" },
           { id: "fastMode", value: true },
         ]),
         runtimeMode: "approval-required",
       });
+      expect(events[0]?.payload).not.toHaveProperty("skillInvocations");
     }),
   );
 
