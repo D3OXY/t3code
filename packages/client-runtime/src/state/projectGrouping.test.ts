@@ -6,6 +6,7 @@ import { chooseLoadBalancedEnvironment } from "../load-balancing.ts";
 import {
   buildProjectGroups,
   derivePhysicalProjectKey,
+  withProjectGroupingOverride,
   type ProjectGroupingSettings,
 } from "./projectGrouping.ts";
 
@@ -171,23 +172,27 @@ describe("buildProjectGroups", () => {
     expect(groups.map((group) => group.label)).toEqual(["t3code", "t3code-2", "t3code-3"]);
   });
 
-  it("applies a physical-project override without dropping its siblings", () => {
+  it("applies a physical-project override without dropping its siblings, and removes it", () => {
     const first = makeProject("t3code", "/work/t3code");
     const second = makeProject("t3code-2", "/work/t3code-2");
     const third = makeProject("t3code-3", "/work/t3code-3");
-    const groups = buildProjectGroups({
-      projects: [first, second, third],
-      settings: settings("repository", {
-        [derivePhysicalProjectKey(second)]: "separate",
-      }),
-    });
+    const projects = [first, second, third];
+    const overrides = withProjectGroupingOverride({}, second, "separate");
+    const groups = buildProjectGroups({ projects, settings: settings("repository", overrides) });
 
+    expect(overrides).toEqual({ [derivePhysicalProjectKey(second)]: "separate" });
     expect(groups).toHaveLength(2);
     expect(groups.flatMap((group) => group.members.map((member) => member.project.id))).toEqual([
       "t3code",
       "t3code-3",
       "t3code-2",
     ]);
+
+    const restored = withProjectGroupingOverride(overrides, second, "inherit");
+    expect(restored).toEqual({});
+    expect(
+      buildProjectGroups({ projects, settings: settings("repository", restored) }),
+    ).toHaveLength(1);
   });
 
   it("dedupes stale registrations at one physical path using the freshest project", () => {

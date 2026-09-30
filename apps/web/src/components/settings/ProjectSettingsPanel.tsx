@@ -41,6 +41,7 @@ import {
 } from "./ProjectFaviconPickerDialog";
 import { ProjectActionsSettings } from "./ProjectActionsSettings";
 import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
+import { ProjectGroupingSelect } from "./ProjectGroupingSelect";
 import { projectGroupTitleNeedsUpdate } from "./ProjectSettingsPanel.logic";
 import { useSettingsProjectGroups } from "./useSettingsProjectGroups";
 
@@ -392,14 +393,17 @@ function ProjectDetail({
           title={member.environmentLabel ?? "Environment"}
           description={member.workspaceRoot}
           control={
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => void removeMembers([member])}
-              aria-label={`Remove checkout ${member.workspaceRoot}`}
-            >
-              Remove
-            </Button>
+            <div className="flex items-center gap-2">
+              <ProjectGroupingSelect member={member} />
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void removeMembers([member])}
+                aria-label={`Remove checkout ${member.workspaceRoot}`}
+              >
+                Remove
+              </Button>
+            </div>
           }
         />
       ))}
@@ -488,6 +492,13 @@ function ProjectDetail({
               </div>
             }
           />
+          {hasMultipleCheckouts ? null : (
+            <SettingsRow
+              title="Grouping"
+              description="Whether this checkout joins other checkouts of the same repository. Saved on this device."
+              control={<ProjectGroupingSelect member={group.memberProjects[0]!} />}
+            />
+          )}
         </SettingsSection>
         <ProjectDefaultsSettings category="project" />
         <ProjectActionsSettings />

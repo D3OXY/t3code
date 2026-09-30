@@ -96,6 +96,20 @@ export function resolveProjectGroupingMode(
   );
 }
 
+/**
+ * Returns the overrides with one checkout's grouping rule set, or removed when
+ * `mode` is `"inherit"` so the checkout follows the global mode again.
+ */
+export function withProjectGroupingOverride(
+  overrides: ProjectGroupingSettings["sidebarProjectGroupingOverrides"],
+  project: Pick<EnvironmentProject, "environmentId" | "workspaceRoot">,
+  mode: SidebarProjectGroupingMode | "inherit",
+): ProjectGroupingSettings["sidebarProjectGroupingOverrides"] {
+  const key = deriveProjectGroupingOverrideKey(project);
+  const { [key]: _previous, ...rest } = overrides;
+  return mode === "inherit" ? rest : { ...rest, [key]: mode };
+}
+
 function deriveRepositoryScopedKey(
   project: Pick<EnvironmentProject, "workspaceRoot" | "repositoryIdentity">,
   groupingMode: SidebarProjectGroupingMode,

@@ -100,6 +100,17 @@ When no image is found, web and desktop show a two-character monogram with a col
 from the icon palette, derived from the saved project name. For example, `Nebula` becomes `NA`,
 `Silver Orchard` becomes `SO`, and `M7 Forge` becomes `M7`.
 
+## Project grouping
+
+With **Settings → General → Project grouping** on, checkouts of the same repository share one
+project, even across environments. The repository comes from the checkout's `upstream` remote,
+then `origin`, so a fork with an `upstream` remote joins the original repository's project.
+
+To split one checkout out, open the project and change its rule under **Grouping**, or under
+**Checkouts** when the project has several. **Keep separate** gives the checkout its own project, and
+**Use default** puts it back. These rules are saved on the device you set them on, and mobile
+only follows the global setting.
+
 ## Keep the default branch current
 
 In Source Control, enable **Automatically pull** to keep the default-branch checkout up to date
