@@ -193,9 +193,12 @@ export default defineConfig({
         },
       },
       {
-        // The one module allowed to name lucide's pull-request glyphs; everything else picks
-        // from its vocabulary. The other import restrictions still apply here.
-        files: ["apps/web/src/components/pullRequest/pullRequestIcons.tsx"],
+        // The one module per client allowed to name lucide's pull-request glyphs; everything
+        // else picks from its vocabulary. The other import restrictions still apply here.
+        files: [
+          "apps/web/src/components/pullRequest/pullRequestIcons.tsx",
+          "apps/glass/src/components/ui/PullRequestGlyph.tsx",
+        ],
         rules: { "eslint/no-restricted-imports": ["error", { paths: RESTRICTED_IMPORT_PATHS }] },
       },
       {
