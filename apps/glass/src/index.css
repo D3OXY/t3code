@@ -1,0 +1,415 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark, .dark *));
+
+/*
+ * Glass design tokens. Colors are paint-only: layout never depends on them, so
+ * switching theme, wallpaper or surface treatment never reflows the app.
+ */
+:root {
+  --font-sans: "Geist", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --bg: #f4f4f1;
+  --fg: #1c1c1e;
+  --fg-muted: #6b6b70;
+  --fg-faint: #9a9aa0;
+  --surface: #fbfbfa;
+  --surface-raised: #ffffff;
+  --surface-sunken: #ecece8;
+  --hover: rgb(0 0 0 / 0.045);
+  --active: rgb(0 0 0 / 0.08);
+  --line: rgb(0 0 0 / 0.08);
+  --line-strong: rgb(0 0 0 / 0.14);
+  --accent: #6d5ef5;
+  --accent-fg: #ffffff;
+  --success: #16a34a;
+  --warning: #d97706;
+  --danger: #dc2626;
+  --info: #2563eb;
+  --bubble: rgb(0 0 0 / 0.055);
+  --code-bg: rgb(0 0 0 / 0.04);
+  --shadow-pop: 0 18px 50px -12px rgb(0 0 0 / 0.25), 0 2px 8px rgb(0 0 0 / 0.06);
+
+  --glass-tint: 72%;
+  --glass-panel-tint: 90%;
+  --glass-blur: 40px;
+
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-glide: cubic-bezier(0.22, 1, 0.36, 1);
+
+  color-scheme: light;
+}
+
+.dark {
+  --bg: #0b0b0c;
+  --fg: #ededee;
+  --fg-muted: #9b9ba1;
+  --fg-faint: #66666c;
+  --surface: #141416;
+  --surface-raised: #1b1b1e;
+  --surface-sunken: #0e0e10;
+  --hover: rgb(255 255 255 / 0.05);
+  --active: rgb(255 255 255 / 0.09);
+  --line: rgb(255 255 255 / 0.075);
+  --line-strong: rgb(255 255 255 / 0.13);
+  --accent: #8b7ff8;
+  --accent-fg: #0b0b0c;
+  --success: #4ade80;
+  --warning: #fbbf24;
+  --danger: #f87171;
+  --info: #60a5fa;
+  --bubble: rgb(255 255 255 / 0.07);
+  --code-bg: rgb(255 255 255 / 0.045);
+  --shadow-pop: 0 24px 60px -12px rgb(0 0 0 / 0.65), 0 2px 10px rgb(0 0 0 / 0.35);
+
+  color-scheme: dark;
+}
+
+/* Opaque surfaces: same layout, no translucency or blur. */
+[data-surface="opaque"] {
+  --glass-tint: 100%;
+  --glass-panel-tint: 100%;
+  --glass-blur: 0px;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --glass-tint: 100%;
+    --glass-panel-tint: 100%;
+    --glass-blur: 0px;
+  }
+}
+
+@theme inline {
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+  --color-bg: var(--bg);
+  --color-fg: var(--fg);
+  --color-muted: var(--fg-muted);
+  --color-faint: var(--fg-faint);
+  --color-surface: var(--surface);
+  --color-raised: var(--surface-raised);
+  --color-sunken: var(--surface-sunken);
+  --color-hover: var(--hover);
+  --color-active: var(--active);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --color-info: var(--info);
+  --color-bubble: var(--bubble);
+  --color-code: var(--code-bg);
+  --shadow-pop: var(--shadow-pop);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  /* clip, not hidden: focusing a field near the edge must not scroll the page. */
+  overflow: clip;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--accent) 35%, transparent);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+/* ---------- Surfaces ---------- */
+
+.glass {
+  background: color-mix(in oklab, var(--surface) var(--glass-tint), transparent);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.7) brightness(1.04);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.7) brightness(1.04);
+}
+
+.glass-panel {
+  background: color-mix(in oklab, var(--surface) var(--glass-panel-tint), transparent);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.5);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.5);
+}
+
+.glass-pop {
+  background: color-mix(in oklab, var(--surface-raised) 88%, transparent);
+  backdrop-filter: blur(28px) saturate(1.6);
+  -webkit-backdrop-filter: blur(28px) saturate(1.6);
+  box-shadow: var(--shadow-pop);
+  border: 1px solid var(--line-strong);
+}
+
+/* ---------- Wallpapers ---------- */
+/*
+ * Built-in wallpapers are pure CSS (no image bytes, no animation), set as
+ * variables on the nearest [data-wallpaper] ancestor so previews can scope
+ * their own. A custom image is applied inline through --wallpaper-image. Skies fade into a
+ * tint of their last color (in oklab, so pastels don't go grey on dark). The halftone
+ * layer adds the printed-sky texture; both layers are static so they never repaint.
+ */
+.wallpaper {
+  position: absolute;
+  inset: 0;
+  background-color: var(--bg);
+  background-image: var(--wallpaper-image, none);
+  background-size: cover;
+  background-position: center;
+}
+
+.wallpaper::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(rgb(255 255 255 / 0.22) 0.7px, transparent 0.8px);
+  background-size: 4px 4px;
+  mask-image: linear-gradient(to bottom, black 0%, black 35%, transparent 75%);
+  opacity: var(--halftone, 0.55);
+  pointer-events: none;
+}
+
+[data-wallpaper="dusk"] {
+  --wallpaper-image:
+    radial-gradient(60% 45% at 18% 20%, #f7b7d3 0%, transparent 70%),
+    radial-gradient(50% 40% at 82% 16%, #ffd1e6 0%, transparent 70%),
+    radial-gradient(70% 55% at 55% 38%, #c9b8ff 0%, transparent 72%),
+    linear-gradient(
+      180deg in oklab,
+      #5a74e8 0%,
+      #8f9cf3 34%,
+      #e4c9e6 62%,
+      color-mix(in oklab, #e4c9e6 42%, var(--bg)) 80%,
+      color-mix(in oklab, #e4c9e6 10%, var(--bg)) 100%
+    );
+}
+
+[data-wallpaper="meadow"] {
+  --wallpaper-image:
+    radial-gradient(55% 40% at 25% 18%, #fff3c4 0%, transparent 70%),
+    radial-gradient(60% 50% at 78% 30%, #b6e3c6 0%, transparent 72%),
+    linear-gradient(
+      180deg in oklab,
+      #7fb6e6 0%,
+      #a9d6d0 38%,
+      #cfe6bf 62%,
+      color-mix(in oklab, #cfe6bf 42%, var(--bg)) 80%,
+      color-mix(in oklab, #cfe6bf 10%, var(--bg)) 100%
+    );
+}
+
+[data-wallpaper="ember"] {
+  --wallpaper-image:
+    radial-gradient(55% 45% at 22% 24%, #ffb27a 0%, transparent 70%),
+    radial-gradient(50% 40% at 80% 18%, #ff7a8a 0%, transparent 70%),
+    linear-gradient(
+      180deg in oklab,
+      #3b2a6b 0%,
+      #b2477a 38%,
+      #f29b6b 62%,
+      color-mix(in oklab, #f29b6b 42%, var(--bg)) 80%,
+      color-mix(in oklab, #f29b6b 10%, var(--bg)) 100%
+    );
+}
+
+[data-wallpaper="ocean"] {
+  --wallpaper-image:
+    radial-gradient(60% 45% at 30% 20%, #9ff0ff 0%, transparent 70%),
+    radial-gradient(55% 45% at 75% 28%, #6aa8ff 0%, transparent 72%),
+    linear-gradient(
+      180deg in oklab,
+      #0f3d7a 0%,
+      #1f78b4 36%,
+      #7cc6d9 62%,
+      color-mix(in oklab, #7cc6d9 42%, var(--bg)) 80%,
+      color-mix(in oklab, #7cc6d9 10%, var(--bg)) 100%
+    );
+}
+
+[data-wallpaper="aurora"] {
+  --wallpaper-image:
+    radial-gradient(45% 35% at 20% 25%, #5cf2b5 0%, transparent 70%),
+    radial-gradient(45% 40% at 70% 18%, #8a6bff 0%, transparent 70%),
+    radial-gradient(60% 40% at 50% 45%, #2fb8c7 0%, transparent 72%),
+    linear-gradient(
+      180deg in oklab,
+      #070b1f 0%,
+      #10183d 40%,
+      #142a3a 64%,
+      color-mix(in oklab, #142a3a 42%, var(--bg)) 80%,
+      color-mix(in oklab, #142a3a 10%, var(--bg)) 100%
+    );
+}
+
+[data-wallpaper="graphite"] {
+  --wallpaper-image: radial-gradient(
+    70% 50% at 50% 0%,
+    color-mix(in oklab, var(--fg) 9%, transparent) 0%,
+    transparent 70%
+  );
+  --halftone: 0.25;
+}
+
+[data-wallpaper="custom"] {
+  --halftone: 0;
+}
+
+/* ---------- Motion ---------- */
+
+@keyframes glass-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes glass-menu-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes glass-dialog-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes glass-fade-quick {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Stepped so the compositor only redraws at each step, not every frame. */
+@keyframes glass-cell {
+  0%,
+  100% {
+    opacity: 0.18;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.animate-fade-in {
+  animation: glass-fade-in 0.5s var(--ease-out-expo) both;
+}
+
+.animate-menu-in {
+  animation: glass-menu-in 0.14s var(--ease-out-expo) both;
+  transform-origin: var(--transform-origin, top);
+}
+
+.animate-dialog-in {
+  animation: glass-dialog-in 0.18s var(--ease-out-expo) both;
+}
+
+.animate-fade-quick {
+  animation: glass-fade-quick 0.15s ease-out both;
+}
+
+.working-cells > span {
+  animation: glass-cell 1.2s steps(6, jump-none) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in,
+  .animate-menu-in,
+  .animate-dialog-in,
+  .animate-fade-quick {
+    animation: none;
+  }
+  .working-cells > span {
+    animation: none;
+    opacity: 0.7;
+  }
+}
+
+/* ---------- Boot splash (replaced by React's first commit) ---------- */
+
+.boot-splash {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: var(--bg);
+}
+
+.boot-wave {
+  display: grid;
+  grid-template-columns: repeat(3, 6px);
+  gap: 4px;
+}
+
+.boot-wave > span {
+  width: 6px;
+  height: 6px;
+  border-radius: 1.5px;
+  background: var(--fg);
+  animation: glass-cell 1.4s steps(7, jump-none) infinite;
+}
+
+.boot-wave > span:nth-child(3n + 2) {
+  animation-delay: 0.15s;
+}
+.boot-wave > span:nth-child(3n + 3) {
+  animation-delay: 0.3s;
+}
+.boot-wave > span:nth-child(n + 4) {
+  animation-delay: 0.45s;
+}
+.boot-wave > span:nth-child(n + 7) {
+  animation-delay: 0.6s;
+}
+
+/* ---------- Edge fades ---------- */
+
+.fade-y {
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    black 12px,
+    black calc(100% - 16px),
+    transparent 100%
+  );
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
