@@ -33,6 +33,7 @@ import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
+import * as ProviderUsage from "../provider/ProviderUsage.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as CommandReceiptStore from "../orchestration-v2/CommandReceiptStore.ts";
@@ -124,6 +125,7 @@ const layerTools = Layer.mergeAll(
   Layer.provide(
     Layer.mock(ProviderRegistry.ProviderRegistry)({ getProviders: Effect.succeed([]) }),
   ),
+  Layer.provide(Layer.mock(ProviderUsage.ProviderUsage)({})),
   Layer.provide(
     Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({
       list: () => Effect.succeed([]),
